@@ -1,8 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { QRCodeSVG } from "qrcode.react";
 import { useCart } from "@/lib/cart-context";
 import { formatPrice } from "@/lib/catalog";
 
@@ -15,15 +13,12 @@ export function PhonePeCheckoutModal({
   isOpen,
   onClose,
 }: PhonePeCheckoutModalProps) {
-  const router = useRouter();
   const { items, subtotalPence } = useCart();
 
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState<"phonepe" | "qr">("phonepe");
-  const [upiUri, setUpiUri] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -74,14 +69,6 @@ export function PhonePeCheckoutModal({
           return;
         }
 
-        // Direct UPI payments remain pending until verified by the provider.
-        if (data.qrData) {
-          setUpiUri(data.qrData);
-          setActiveTab("qr");
-          setIsSubmitting(false);
-          return;
-        }
-
         throw new Error("Payment provider did not return a secure checkout URL.");
       } else {
         throw new Error(data.error || "Payment initiation failed. Please try again.");
@@ -91,24 +78,6 @@ export function PhonePeCheckoutModal({
       alert(err instanceof Error ? err.message : "Payment initiation failed. Please try again.");
       setIsSubmitting(false);
     }
-  };
-
-  const upiVpa = process.env.NEXT_PUBLIC_UPI_VPA || "9611556001@ybl";
-  const upiName = process.env.NEXT_PUBLIC_UPI_NAME || "Akiyo Digital Store";
-  const upiBank = process.env.NEXT_PUBLIC_UPI_BANK_NAME || "Airtel Payment Bank";
-
-  const openQrTab = () => {
-    if (!upiUri) {
-      const params = new URLSearchParams({
-        pa: upiVpa,
-        pn: upiName,
-        am: totalPayableRupees.toFixed(2),
-        cu: "INR",
-        tn: "Akiyo wallpaper order",
-      });
-      setUpiUri(`upi://pay?${params.toString()}`);
-    }
-    setActiveTab("qr");
   };
 
   return (
@@ -159,27 +128,7 @@ export function PhonePeCheckoutModal({
           </p>
         </div>
 
-        {/* Tab switch: PhonePe Gateway vs Scan QR */}
-        <div className="phonepe-tabs">
-          <button
-            type="button"
-            className={`phonepe-tab ${activeTab === "phonepe" ? "active" : ""}`}
-            onClick={() => setActiveTab("phonepe")}
-          >
-            PhonePe / UPI
-          </button>
-          <button
-            type="button"
-            className={`phonepe-tab ${activeTab === "qr" ? "active" : ""}`}
-            onClick={openQrTab}
-          >
-            Scan UPI QR Code
-          </button>
-        </div>
-
-        {activeTab === "phonepe" ? (
-          /* PhonePe Form */
-          <form onSubmit={handlePhonePePay} className="phonepe-form">
+        <form onSubmit={handlePhonePePay} className="phonepe-form">
             <div className="phonepe-field">
               <label htmlFor="customer-name">Full Name</label>
               <input
@@ -273,39 +222,6 @@ export function PhonePeCheckoutModal({
               <span>📱 PhonePe &bull; GPay &bull; Paytm &bull; UPI</span>
             </div>
           </form>
-        ) : (
-          /* UPI QR Code Mode */
-          <div className="phonepe-qr-view">
-            <p className="phonepe-qr-instruction">
-              Scan with <strong>PhonePe</strong>, <strong>Google Pay</strong>, or{" "}
-              <strong>Paytm</strong> to pay <strong>₹{totalPayableRupees}</strong>
-            </p>
-
-            <div className="phonepe-qr-box">
-              {upiUri && (
-                <QRCodeSVG
-                  value={upiUri}
-                  size={220}
-                  level="H"
-                  includeMargin
-                  aria-label="UPI payment QR code"
-                />
-              )}
-            </div>
-
-            <p className="phonepe-upi-id-note">
-              UPI ID: <code>{upiVpa}</code>
-              <br />Bank: {upiBank}
-            </p>
-
-            <a className="phonepe-paid-confirm-btn" href={upiUri ?? undefined}>
-              Open UPI app
-            </a>
-            <p className="phonepe-payment-pending" role="status">
-              Direct UPI transfers are not automatically verified here. This QR does not confirm an order.
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );

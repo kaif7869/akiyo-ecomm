@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyOrderReceipt } from "@/lib/order-receipt";
+import { getOrder } from "@/lib/order-store";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,23 @@ export async function GET(request: Request) {
     );
   }
 
+  const order = await getOrder(verified.transactionId);
+  if (!order || order.paymentStatus !== "paid" || order.amountPence !== verified.amountPence) {
+    return NextResponse.json(
+      { verified: false },
+      { status: 401, headers: { "Cache-Control": "private, no-store" } }
+    );
+  }
+
   return NextResponse.json(
-    { verified: true, transactionId: verified.transactionId, amountPence: verified.amountPence },
+    {
+      verified: true,
+      transactionId: order.transactionId,
+      amountPence: order.amountPence,
+      customerEmail: order.customerEmail,
+      items: order.items,
+      emailStatus: order.emailStatus,
+    },
     { headers: { "Cache-Control": "private, no-store" } }
   );
 }

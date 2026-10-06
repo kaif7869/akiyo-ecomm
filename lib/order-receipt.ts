@@ -10,7 +10,7 @@ type ReceiptPayload = {
 };
 
 function getReceiptSecret(): string | null {
-  const secret = process.env.ORDER_RECEIPT_SECRET;
+  const secret = process.env.ORDER_RECEIPT_SECRET || process.env.PHONEPE_SALT_KEY;
   return secret && secret.length >= 32 ? secret : null;
 }
 

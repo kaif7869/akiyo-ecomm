@@ -11,10 +11,17 @@ function OrderSuccessContent() {
   const [verifiedOrder, setVerifiedOrder] = useState<{
     transactionId: string;
     amountPence: number;
+    customerEmail: string;
+    items: Array<{
+      id: string;
+      title: string;
+      quantity: number;
+      unitPricePence: number;
+      artworkImage: string;
+    }>;
+    emailStatus: "pending" | "sending" | "sent" | "failed";
   } | null>(null);
   const [isChecking, setIsChecking] = useState(true);
-
-  const [downloadStarted, setDownloadStarted] = useState(false);
 
   useEffect(() => {
     setIsChecking(true);
@@ -33,9 +40,18 @@ function OrderSuccessContent() {
           result.verified === true &&
           typeof result.transactionId === "string" &&
           Number.isSafeInteger(result.amountPence) &&
-          result.amountPence > 0
+          result.amountPence > 0 &&
+          typeof result.customerEmail === "string" &&
+          Array.isArray(result.items) &&
+          ["pending", "sending", "sent", "failed"].includes(result.emailStatus)
         ) {
-          return { transactionId: result.transactionId, amountPence: result.amountPence };
+          return {
+            transactionId: result.transactionId,
+            amountPence: result.amountPence,
+            customerEmail: result.customerEmail,
+            items: result.items,
+            emailStatus: result.emailStatus,
+          };
         }
         return null;
       })
@@ -80,44 +96,12 @@ function OrderSuccessContent() {
     );
   }
 
-  const handleDownload = () => {
-    setDownloadStarted(true);
-
-    // Create a temporary mock file download for the customer
-    const textContent = `AKYIO ARTWORK BUNDLE (4K & 6K Ultra HD)
-Order Reference: ${txnId}
-Amount Paid: ₹${amount}
-Date: ${new Date().toLocaleDateString("en-IN")}
-
-Thank you for your purchase!
-Your high-resolution impasto wallpapers are ready for download.
-
-Included Resolutions:
-- Mobile (iPhone, Samsung, Pixel): 2160 x 3840 (4K Vertical)
-- Desktop & Laptops: 3840 x 2160 (4K UHD)
-- Ultrawide Displays: 5120 x 2160 (6K Ultrawide)
-
-License: Personal Use Non-Commercial License.
-Support: support@akiyo.co.uk`;
-
-    const blob = new Blob([textContent], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `Akiyo_Wallpapers_Bundle_${txnId}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
   return (
     <div className="order-success-page">
       <SiteHeader activePage="catalog" variant="solid" />
 
       <main className="order-success-main">
         <div className="order-success-card">
-          {/* Success Checkmark */}
           <div className="order-success-icon-wrap">
             <svg
               className="order-success-check"
@@ -127,6 +111,7 @@ Support: support@akiyo.co.uk`;
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
+              aria-hidden="true"
             >
               <polyline points="20 6 9 17 4 12" />
             </svg>
@@ -138,41 +123,31 @@ Support: support@akiyo.co.uk`;
 
           <h1 className="order-success-title">Thank you for your order!</h1>
           <p className="order-success-subtitle">
-            Your payment of <strong>₹{amount}</strong> was successful. Your 4K
-            wallpapers are ready to download immediately.
+            Your payment of <strong>₹{amount}</strong> was verified successfully.
+            {verifiedOrder.emailStatus === "sent"
+              ? ` Your order details were emailed to ${verifiedOrder.customerEmail}.`
+              : verifiedOrder.emailStatus === "failed"
+                ? ` Payment is confirmed, but email delivery failed for ${verifiedOrder.customerEmail}. Please contact support@akiyo.co.uk.`
+                : ` Your order email is being sent to ${verifiedOrder.customerEmail}.`}
           </p>
 
-          {/* Download Action Box */}
-          <div className="order-download-box">
+          <section className="order-download-box" aria-labelledby="purchased-items-title">
             <div className="order-download-info">
-              <h3>Akiyo 4K &amp; 6K Ultra-HD Wallpapers</h3>
-              <p>Instant ZIP package containing all resolutions</p>
+              <h3 id="purchased-items-title">Your purchased items</h3>
+              <p>These artwork links are also included in your order email.</p>
             </div>
-
-            <button
-              type="button"
-              className="order-download-btn"
-              onClick={handleDownload}
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="20"
-                height="20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              <span>
-                {downloadStarted ? "Downloading Pack..." : "Download 4K Art Pack"}
-              </span>
-            </button>
-          </div>
+            <ul className="order-confirmed-items">
+              {verifiedOrder.items.map((item) => (
+                <li key={item.id}>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <span>Qty {item.quantity} · ₹{((item.unitPricePence * item.quantity) / 100).toFixed(2)}</span>
+                  </div>
+                  <a href={item.artworkImage} target="_blank" rel="noreferrer">View artwork</a>
+                </li>
+              ))}
+            </ul>
+          </section>
 
           {/* Order Details Grid */}
           <div className="order-meta-grid">
@@ -189,10 +164,18 @@ Support: support@akiyo.co.uk`;
               <span className="order-meta-value">PhonePe confirmed</span>
             </div>
             <div className="order-meta-item">
-              <span className="order-meta-label">Delivery Status</span>
-              <span className="order-meta-value status-active">
-                ✓ Available Instantly
+              <span className="order-meta-label">Email status</span>
+              <span className="order-meta-value">
+                {verifiedOrder.emailStatus === "sent"
+                  ? "Sent"
+                  : verifiedOrder.emailStatus === "failed"
+                    ? "Failed"
+                    : "Sending"}
               </span>
+            </div>
+            <div className="order-meta-item">
+              <span className="order-meta-label">Order items</span>
+              <span className="order-meta-value">{verifiedOrder.items.length} shown above</span>
             </div>
           </div>
 

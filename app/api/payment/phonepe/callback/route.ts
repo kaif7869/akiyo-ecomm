@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { getPhonePeConfig, verifyPhonePeChecksum } from "@/lib/phonepe";
 import { createOrderReceipt } from "@/lib/order-receipt";
+import {
+  claimOrderEmail,
+  confirmOrderPayment,
+  getOrder,
+  setOrderEmailStatus,
+} from "@/lib/order-store";
+import { sendOrderEmail } from "@/lib/order-email";
 
 export async function POST(request: Request) {
   try {
@@ -54,6 +61,29 @@ export async function POST(request: Request) {
       amountPence <= 0
     ) {
       return NextResponse.redirect(`${appUrl}/order-success?status=pending`, 303);
+    }
+
+    const pendingOrder = await getOrder(transactionId);
+    if (!pendingOrder || pendingOrder.amountPence !== amountPence) {
+      return NextResponse.redirect(`${appUrl}/order-success?status=unverified`, 303);
+    }
+
+    const paidOrder = await confirmOrderPayment(transactionId, amountPence);
+    if (!paidOrder) {
+      return NextResponse.redirect(`${appUrl}/order-success?status=unverified`, 303);
+    }
+
+    if (paidOrder.emailStatus !== "sent") {
+      const claimedOrder = await claimOrderEmail(transactionId);
+      if (claimedOrder) {
+        try {
+          await sendOrderEmail(claimedOrder);
+          await setOrderEmailStatus(transactionId, "sent");
+        } catch (emailError) {
+          console.error("Order email delivery failed.", emailError);
+          await setOrderEmailStatus(transactionId, "failed");
+        }
+      }
     }
 
     const receipt = createOrderReceipt(transactionId, amountPence);

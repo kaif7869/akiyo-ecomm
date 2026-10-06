@@ -2606,6 +2606,45 @@ h1, h2, h3, h4, h5, h6 {
   color: #64748b;
 }
 
+.order-confirmed-items {
+  list-style: none;
+  border-top: 1px solid #dbe1e8;
+}
+
+.order-confirmed-items li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid #dbe1e8;
+}
+
+.order-confirmed-items li > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.order-confirmed-items strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.order-confirmed-items span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.order-confirmed-items a {
+  flex: 0 0 auto;
+  color: #172033;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .order-download-btn {
   background-color: #000000;
   color: #ffffff;

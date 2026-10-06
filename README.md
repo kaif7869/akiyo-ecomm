@@ -34,3 +34,20 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Payments and order email
+
+The payment flow stores a pending order in Neon before sending the customer to PhonePe. The signed PhonePe callback must match that stored transaction and amount before the order is marked paid and its summary is sent with Resend.
+
+Configure these server-side environment variables in Vercel (do not use `NEXT_PUBLIC_` for secrets):
+
+- `DATABASE_URL`: Neon Postgres connection string.
+- `RESEND_API_KEY`: Resend API key.
+- `RESEND_FROM_EMAIL`: sender address verified with Resend, for example `Akiyo Orders <orders@your-domain.example>`.
+- `PHONEPE_MERCHANT_ID`, `PHONEPE_SALT_KEY`, and `PHONEPE_SALT_INDEX`: live PhonePe merchant credentials.
+- `PHONEPE_ENV=PRODUCTION` and `NEXT_PUBLIC_BASE_URL=https://your-production-domain`.
+- `NEXT_PUBLIC_UPI_VPA`, `NEXT_PUBLIC_UPI_NAME`, and `NEXT_PUBLIC_UPI_BANK_NAME` remain storefront account details, not credentials.
+
+The Neon order table is created on first payment initiation; `db/schema.sql` contains the equivalent schema for review or manual setup. Add variables to Vercel Production and redeploy. Preview deployments should use separate test credentials and a separate database.
+
+The email currently includes the verified order summary and links to each catalog artwork URL. The repository does not contain high-resolution ZIP/download files, so upload actual deliverables to private object storage and add secure download URLs before advertising ZIP or 4K delivery.
