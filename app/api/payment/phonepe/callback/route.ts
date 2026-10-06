@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
 import { getPhonePeConfig, verifyPhonePeChecksum } from "@/lib/phonepe";
+import { createOrderReceipt } from "@/lib/order-receipt";
 
 export async function POST(request: Request) {
   try {
-    const appUrl =
-      process.env.NEXT_PUBLIC_BASE_URL ||
-      request.headers.get("origin") ||
-      "http://localhost:3000";
+    const appUrl = process.env.NEXT_PUBLIC_BASE_URL || new URL(request.url).origin;
 
     const contentType = request.headers.get("content-type") || "";
     let base64Response = "";
@@ -20,64 +18,64 @@ export async function POST(request: Request) {
     }
 
     if (!base64Response) {
-      // In case PhonePe redirected without payload, redirect to success
-      return NextResponse.redirect(`${appUrl}/order-success`, 303);
+      return NextResponse.redirect(`${appUrl}/order-success?status=pending`, 303);
     }
 
     const config = getPhonePeConfig();
     const receivedChecksum = request.headers.get("x-verify") || "";
-
-    // Verify signature if header is present
-    if (receivedChecksum) {
-      const isValid = verifyPhonePeChecksum(
-        base64Response,
-        receivedChecksum,
-        config.saltKey,
-        config.saltIndex
-      );
-      if (!isValid) {
-        console.warn("PhonePe signature verification mismatch, proceeding in dev mode");
-      }
+    if (!receivedChecksum || !verifyPhonePeChecksum(
+      base64Response,
+      receivedChecksum,
+      config.saltKey,
+      config.saltIndex
+    )) {
+      return NextResponse.redirect(`${appUrl}/order-success?status=unverified`, 303);
     }
 
-    const decoded = JSON.parse(
+    const decoded: unknown = JSON.parse(
       Buffer.from(base64Response, "base64").toString("utf-8")
     );
-
-    const isSuccess =
-      decoded.code === "PAYMENT_SUCCESS" || decoded.success === true;
-    const txnId =
-      decoded.data?.merchantTransactionId ||
-      decoded.data?.transactionId ||
-      `TXN_${Date.now()}`;
-    const amount = decoded.data?.amount ? decoded.data.amount / 100 : 20;
-
-    if (isSuccess) {
-      return NextResponse.redirect(
-        `${appUrl}/order-success?txnId=${txnId}&amount=${amount}`,
-        303
-      );
-    } else {
-      return NextResponse.redirect(
-        `${appUrl}/order-success?status=review&txnId=${txnId}&amount=${amount}`,
-        303
-      );
+    if (!decoded || typeof decoded !== "object") {
+      return NextResponse.redirect(`${appUrl}/order-success?status=unverified`, 303);
     }
+
+    const result = decoded as {
+      code?: unknown;
+      data?: { merchantTransactionId?: unknown; amount?: unknown };
+    };
+    const transactionId = result.data?.merchantTransactionId;
+    const amountPence = result.data?.amount;
+    if (
+      result.code !== "PAYMENT_SUCCESS" ||
+      typeof transactionId !== "string" ||
+      !/^AKY_[a-f0-9]{32}$/.test(transactionId) ||
+      typeof amountPence !== "number" ||
+      !Number.isSafeInteger(amountPence) ||
+      amountPence <= 0
+    ) {
+      return NextResponse.redirect(`${appUrl}/order-success?status=pending`, 303);
+    }
+
+    const receipt = createOrderReceipt(transactionId, amountPence);
+    if (!receipt) {
+      return NextResponse.redirect(`${appUrl}/order-success?status=pending`, 303);
+    }
+    return NextResponse.redirect(
+      `${appUrl}/order-success?receipt=${encodeURIComponent(receipt)}`,
+      303
+    );
   } catch (error) {
-    console.error("PhonePe callback processing error:", error);
-    const appUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-    return NextResponse.redirect(`${appUrl}/order-success`, 303);
+    console.error("PhonePe callback verification failed.", error);
+    const appUrl = process.env.NEXT_PUBLIC_BASE_URL || new URL(request.url).origin;
+    return NextResponse.redirect(`${appUrl}/order-success?status=unverified`, 303);
   }
 }
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const appUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-  const txnId = searchParams.get("txnId") || `TXN_${Date.now()}`;
-  const amount = searchParams.get("amount") || "20";
+  const appUrl = process.env.NEXT_PUBLIC_BASE_URL || new URL(request.url).origin;
 
   return NextResponse.redirect(
-    `${appUrl}/order-success?txnId=${txnId}&amount=${amount}`,
+    `${appUrl}/order-success?status=pending`,
     303
   );
 }

@@ -43,17 +43,13 @@ export function SiteHeader({
         }`}
       >
         {/* Promotional Ad Top Banner */}
-        <aside className="akiyo-ad-banner" aria-label="Special promotion">
+        {/* <aside className="akiyo-ad-banner" aria-label="Special promotion">
           <div className="akiyo-ad-banner__inner">
-            <span className="akiyo-ad-badge">⚡ LIMITED AD OFFER</span>
-            <p className="akiyo-ad-text">
-              All 4K Art Collections worth <s>₹99</s> now for just <strong>₹20</strong> (Save ₹79 / Flat ₹69 OFF) • Instant PhonePe &amp; UPI
-            </p>
             <Link href="/collection" className="akiyo-ad-btn">
               Claim for ₹20 &rarr;
             </Link>
           </div>
-        </aside>
+        </aside> */}
 
         <div className="akiyo-header__inner">
           {/* Left: Desktop Nav / Mobile Hamburger */}

@@ -88,16 +88,13 @@ export default function Home() {
           </div>
 
           <div className="akiyo-hero__content">
-            <div className="akiyo-hero__promo-pill">
-              LIMITED TIME AD DEAL: ₹99 ONLY FOR ₹20 (SAVE ₹79)
-            </div>
             <h1 className="akiyo-hero__title">Museum-quality wallpapers.</h1>
             <p className="akiyo-hero__subtitle">
-              Exclusive 4K–6K impasto artworks for desktop &amp; mobile. Pay with PhonePe &amp; get instant access.
+              Exclusive impasto wallpapers for desktop & mobile.
             </p>
             <div className="akiyo-hero__cta-group">
               <Link href="/collection" className="akiyo-btn-hero">
-                Get All Packs @ ₹20 Only
+                SHOP THE COLLECTION
               </Link>
             </div>
           </div>

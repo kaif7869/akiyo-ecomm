@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Newsreader, Red_Hat_Text } from "next/font/google";
 import { CartProvider } from "@/lib/cart-context";
+import { FirstOrderPromo } from "@/components/promo/first-order-promo";
 import "./globals.css";
 
 const newsreader = Newsreader({
@@ -39,7 +40,10 @@ export default function RootLayout({
       className={`${newsreader.variable} ${redHatText.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">
-        <CartProvider>{children}</CartProvider>
+        <CartProvider>
+          {children}
+          <FirstOrderPromo />
+        </CartProvider>
       </body>
     </html>
   );

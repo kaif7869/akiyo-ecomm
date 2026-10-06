@@ -18,13 +18,28 @@ export interface PhonePeConfig {
   baseUrl: string;
 }
 
+export function isPhonePeConfigured(): boolean {
+  return [
+    process.env.PHONEPE_MERCHANT_ID,
+    process.env.PHONEPE_SALT_KEY,
+    process.env.PHONEPE_SALT_INDEX,
+  ].every((value) => Boolean(value?.trim()));
+}
+
 export function getPhonePeConfig(): PhonePeConfig {
-  const env = (process.env.PHONEPE_ENV as "UAT" | "PRODUCTION") || "UAT";
+  const env = process.env.PHONEPE_ENV || "UAT";
+  if (env !== "UAT" && env !== "PRODUCTION") {
+    throw new Error("PHONEPE_ENV must be UAT or PRODUCTION.");
+  }
+
+  if (!isPhonePeConfigured()) {
+    throw new Error("PhonePe gateway credentials are not configured.");
+  }
+
   return {
-    merchantId: process.env.PHONEPE_MERCHANT_ID || "PGTESTPAYUAT",
-    saltKey:
-      process.env.PHONEPE_SALT_KEY || "099eb0cd-02cf-4e2a-8aca-3e6c6aff0399",
-    saltIndex: process.env.PHONEPE_SALT_INDEX || "1",
+    merchantId: process.env.PHONEPE_MERCHANT_ID!,
+    saltKey: process.env.PHONEPE_SALT_KEY!,
+    saltIndex: process.env.PHONEPE_SALT_INDEX!,
     env,
     baseUrl:
       env === "PRODUCTION"
@@ -62,7 +77,9 @@ export function verifyPhonePeChecksum(
     .update(base64Response + saltKey)
     .digest("hex");
   const expectedChecksum = `${calculatedHash}###${saltIndex}`;
-  return receivedChecksum === expectedChecksum;
+  const expected = Buffer.from(expectedChecksum);
+  const received = Buffer.from(receivedChecksum);
+  return expected.length === received.length && crypto.timingSafeEqual(expected, received);
 }
 
 /**

@@ -2,16 +2,83 @@
 
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { SiteHeader } from "@/components/layout/site-header";
 
 function OrderSuccessContent() {
   const searchParams = useSearchParams();
-  const txnId = searchParams.get("txnId") || `TXN_${Date.now()}`;
-  const amount = searchParams.get("amount") || "20";
-  const email = searchParams.get("email") || "customer@example.com";
+  const receipt = searchParams.get("receipt");
+  const [verifiedOrder, setVerifiedOrder] = useState<{
+    transactionId: string;
+    amountPence: number;
+  } | null>(null);
+  const [isChecking, setIsChecking] = useState(true);
 
   const [downloadStarted, setDownloadStarted] = useState(false);
+
+  useEffect(() => {
+    setIsChecking(true);
+    setVerifiedOrder(null);
+    if (!receipt) {
+      setIsChecking(false);
+      return;
+    }
+
+    let active = true;
+    fetch(`/api/order/verify?receipt=${encodeURIComponent(receipt)}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const result = await response.json();
+        if (
+          result.verified === true &&
+          typeof result.transactionId === "string" &&
+          Number.isSafeInteger(result.amountPence) &&
+          result.amountPence > 0
+        ) {
+          return { transactionId: result.transactionId, amountPence: result.amountPence };
+        }
+        return null;
+      })
+      .then((order) => {
+        if (active) setVerifiedOrder(order);
+      })
+      .catch(() => {
+        if (active) setVerifiedOrder(null);
+      })
+      .finally(() => {
+        if (active) setIsChecking(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [receipt]);
+
+  const txnId = verifiedOrder?.transactionId ?? "";
+  const amount = verifiedOrder ? (verifiedOrder.amountPence / 100).toFixed(2) : "0.00";
+
+  if (isChecking && receipt) {
+    return <main className="order-success-main" aria-live="polite">Verifying payment...</main>;
+  }
+
+  if (!verifiedOrder) {
+    return (
+      <div className="order-success-page">
+        <SiteHeader activePage="catalog" variant="solid" />
+        <main className="order-success-main">
+          <section className="order-success-card" aria-labelledby="payment-pending-title">
+            <h1 id="payment-pending-title" className="order-success-title">Payment awaiting verification</h1>
+            <p className="order-success-subtitle">
+              We only confirm an order after PhonePe verifies the payment. Direct UPI QR transfers are not automatically verified by this site.
+            </p>
+            <div className="order-success-actions">
+              <Link href="/collection" className="order-return-btn">Return to collection</Link>
+            </div>
+          </section>
+        </main>
+      </div>
+    );
+  }
 
   const handleDownload = () => {
     setDownloadStarted(true);
@@ -46,7 +113,7 @@ Support: support@akiyo.co.uk`;
 
   return (
     <div className="order-success-page">
-      <SiteHeader activePage="collection" variant="solid" />
+      <SiteHeader activePage="catalog" variant="solid" />
 
       <main className="order-success-main">
         <div className="order-success-card">
@@ -118,8 +185,8 @@ Support: support@akiyo.co.uk`;
               <span className="order-meta-value highlight">₹{amount}</span>
             </div>
             <div className="order-meta-item">
-              <span className="order-meta-label">Email Receipt</span>
-              <span className="order-meta-value">{email}</span>
+              <span className="order-meta-label">Verification</span>
+              <span className="order-meta-value">PhonePe confirmed</span>
             </div>
             <div className="order-meta-item">
               <span className="order-meta-label">Delivery Status</span>
