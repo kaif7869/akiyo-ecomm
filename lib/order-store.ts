@@ -32,29 +32,46 @@ type DatabaseRow = {
   email_status: OrderRecord["emailStatus"];
 };
 
+declare global {
+  var __akiyoFallbackOrders: Map<string, OrderRecord> | undefined;
+}
+
+const memoryOrders: Map<string, OrderRecord> =
+  globalThis.__akiyoFallbackOrders || (globalThis.__akiyoFallbackOrders = new Map());
+
 function getDatabase() {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) throw new Error("Order database is not configured.");
+  const connectionString = process.env.DATABASE_URL?.trim();
+  if (!connectionString) return null;
   return neon(connectionString);
 }
 
+let tableEnsured = false;
 async function ensureOrdersTable() {
   const sql = getDatabase();
-  await sql`
-    CREATE TABLE IF NOT EXISTS akiyo_orders (
-      transaction_id TEXT PRIMARY KEY,
-      customer_name VARCHAR(100) NOT NULL,
-      customer_email VARCHAR(254) NOT NULL,
-      customer_phone VARCHAR(20) NOT NULL,
-      amount_pence INTEGER NOT NULL CHECK (amount_pence > 0),
-      items JSONB NOT NULL,
-      payment_status TEXT NOT NULL CHECK (payment_status IN ('pending', 'paid', 'failed')),
-      email_status TEXT NOT NULL CHECK (email_status IN ('pending', 'sending', 'sent', 'failed')),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  return sql;
+  if (!sql) return null;
+  if (tableEnsured) return sql;
+
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS akiyo_orders (
+        transaction_id TEXT PRIMARY KEY,
+        customer_name VARCHAR(100) NOT NULL,
+        customer_email VARCHAR(254) NOT NULL,
+        customer_phone VARCHAR(20) NOT NULL,
+        amount_pence INTEGER NOT NULL CHECK (amount_pence > 0),
+        items JSONB NOT NULL,
+        payment_status TEXT NOT NULL CHECK (payment_status IN ('pending', 'paid', 'failed')),
+        email_status TEXT NOT NULL CHECK (email_status IN ('pending', 'sending', 'sent', 'failed')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+    tableEnsured = true;
+    return sql;
+  } catch (err) {
+    console.warn("Neon orders table setup failed, continuing with in-memory store:", err);
+    return null;
+  }
 }
 
 function mapOrder(row: DatabaseRow): OrderRecord {
@@ -78,83 +95,154 @@ export async function createPendingOrder(order: {
   amountPence: number;
   items: OrderItem[];
 }): Promise<void> {
-  const sql = await ensureOrdersTable();
-  await sql`
-    INSERT INTO akiyo_orders (
-      transaction_id, customer_name, customer_email, customer_phone,
-      amount_pence, items, payment_status, email_status
-    ) VALUES (
-      ${order.transactionId}, ${order.customerName}, ${order.customerEmail},
-      ${order.customerPhone}, ${order.amountPence}, ${JSON.stringify(order.items)}::jsonb,
-      'pending', 'pending'
-    )
-  `;
+  const record: OrderRecord = {
+    ...order,
+    paymentStatus: "pending",
+    emailStatus: "pending",
+  };
+  memoryOrders.set(order.transactionId, record);
+
+  try {
+    const sql = await ensureOrdersTable();
+    if (sql) {
+      await sql`
+        INSERT INTO akiyo_orders (
+          transaction_id, customer_name, customer_email, customer_phone,
+          amount_pence, items, payment_status, email_status
+        ) VALUES (
+          ${order.transactionId}, ${order.customerName}, ${order.customerEmail},
+          ${order.customerPhone}, ${order.amountPence}, ${JSON.stringify(order.items)}::jsonb,
+          'pending', 'pending'
+        )
+      `;
+    }
+  } catch (err) {
+    console.warn("Neon createPendingOrder failed, saved in memory:", err);
+  }
 }
 
 export async function markOrderInitiationFailed(transactionId: string): Promise<void> {
-  const sql = await ensureOrdersTable();
-  await sql`
-    UPDATE akiyo_orders
-    SET payment_status = 'failed', updated_at = NOW()
-    WHERE transaction_id = ${transactionId} AND payment_status = 'pending'
-  `;
+  const mem = memoryOrders.get(transactionId);
+  if (mem && mem.paymentStatus === "pending") {
+    mem.paymentStatus = "failed";
+  }
+
+  try {
+    const sql = await ensureOrdersTable();
+    if (sql) {
+      await sql`
+        UPDATE akiyo_orders
+        SET payment_status = 'failed', updated_at = NOW()
+        WHERE transaction_id = ${transactionId} AND payment_status = 'pending'
+      `;
+    }
+  } catch (err) {
+    console.warn("Neon markOrderInitiationFailed failed:", err);
+  }
 }
 
 export async function getOrder(transactionId: string): Promise<OrderRecord | null> {
-  const sql = await ensureOrdersTable();
-  const rows = await sql`
-    SELECT transaction_id, customer_name, customer_email, customer_phone,
-           amount_pence, items, payment_status, email_status
-    FROM akiyo_orders WHERE transaction_id = ${transactionId} LIMIT 1
-  `;
-  const row = rows[0] as unknown as DatabaseRow | undefined;
-  return row ? mapOrder(row) : null;
+  try {
+    const sql = await ensureOrdersTable();
+    if (sql) {
+      const rows = await sql`
+        SELECT transaction_id, customer_name, customer_email, customer_phone,
+               amount_pence, items, payment_status, email_status
+        FROM akiyo_orders WHERE transaction_id = ${transactionId} LIMIT 1
+      `;
+      const row = rows[0] as unknown as DatabaseRow | undefined;
+      if (row) return mapOrder(row);
+    }
+  } catch (err) {
+    console.warn("Neon getOrder failed, checking memory store:", err);
+  }
+
+  return memoryOrders.get(transactionId) || null;
 }
 
 export async function confirmOrderPayment(
   transactionId: string,
   amountPence: number
 ): Promise<OrderRecord | null> {
-  const sql = await ensureOrdersTable();
-  await sql`
-    UPDATE akiyo_orders
-    SET payment_status = 'paid', updated_at = NOW()
-    WHERE transaction_id = ${transactionId}
-      AND amount_pence = ${amountPence}
-      AND payment_status = 'pending'
-  `;
-  const order = await getOrder(transactionId);
-  return order?.paymentStatus === "paid" && order.amountPence === amountPence ? order : null;
+  const mem = memoryOrders.get(transactionId);
+  if (mem && mem.amountPence === amountPence) {
+    mem.paymentStatus = "paid";
+  }
+
+  try {
+    const sql = await ensureOrdersTable();
+    if (sql) {
+      await sql`
+        UPDATE akiyo_orders
+        SET payment_status = 'paid', updated_at = NOW()
+        WHERE transaction_id = ${transactionId}
+          AND amount_pence = ${amountPence}
+          AND payment_status = 'pending'
+      `;
+      const order = await getOrder(transactionId);
+      if (order?.paymentStatus === "paid" && order.amountPence === amountPence) {
+        return order;
+      }
+    }
+  } catch (err) {
+    console.warn("Neon confirmOrderPayment failed, using memory:", err);
+  }
+
+  return mem && mem.paymentStatus === "paid" ? mem : null;
 }
 
 export async function claimOrderEmail(transactionId: string): Promise<OrderRecord | null> {
-  const sql = await ensureOrdersTable();
-  const rows = await sql`
-    UPDATE akiyo_orders
-    SET email_status = 'sending', updated_at = NOW()
-    WHERE transaction_id = ${transactionId}
-      AND payment_status = 'paid'
-      AND (
-        email_status IN ('pending', 'failed')
-        OR (email_status = 'sending' AND updated_at < NOW() - INTERVAL '5 minutes')
-      )
-    RETURNING transaction_id, customer_name, customer_email, customer_phone,
-              amount_pence, items, payment_status, email_status
-  `;
-  const row = rows[0] as unknown as DatabaseRow | undefined;
-  return row ? mapOrder(row) : null;
+  const mem = memoryOrders.get(transactionId);
+  if (mem && mem.paymentStatus === "paid" && (mem.emailStatus === "pending" || mem.emailStatus === "failed")) {
+    mem.emailStatus = "sending";
+  }
+
+  try {
+    const sql = await ensureOrdersTable();
+    if (sql) {
+      const rows = await sql`
+        UPDATE akiyo_orders
+        SET email_status = 'sending', updated_at = NOW()
+        WHERE transaction_id = ${transactionId}
+          AND payment_status = 'paid'
+          AND (
+            email_status IN ('pending', 'failed')
+            OR (email_status = 'sending' AND updated_at < NOW() - INTERVAL '5 minutes')
+          )
+        RETURNING transaction_id, customer_name, customer_email, customer_phone,
+                  amount_pence, items, payment_status, email_status
+      `;
+      const row = rows[0] as unknown as DatabaseRow | undefined;
+      if (row) return mapOrder(row);
+    }
+  } catch (err) {
+    console.warn("Neon claimOrderEmail failed:", err);
+  }
+
+  return mem && mem.emailStatus === "sending" ? mem : null;
 }
 
 export async function setOrderEmailStatus(
   transactionId: string,
   status: "sent" | "failed"
 ): Promise<void> {
-  const sql = await ensureOrdersTable();
-  await sql`
-    UPDATE akiyo_orders
-    SET email_status = ${status}, updated_at = NOW()
-    WHERE transaction_id = ${transactionId} AND payment_status = 'paid'
-  `;
+  const mem = memoryOrders.get(transactionId);
+  if (mem && mem.paymentStatus === "paid") {
+    mem.emailStatus = status;
+  }
+
+  try {
+    const sql = await ensureOrdersTable();
+    if (sql) {
+      await sql`
+        UPDATE akiyo_orders
+        SET email_status = ${status}, updated_at = NOW()
+        WHERE transaction_id = ${transactionId} AND payment_status = 'paid'
+      `;
+    }
+  } catch (err) {
+    console.warn("Neon setOrderEmailStatus failed:", err);
+  }
 }
 
 export function getOrderItemsFromCart(

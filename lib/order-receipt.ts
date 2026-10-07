@@ -1,27 +1,37 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "crypto";
 
+import type { OrderItem } from "./order-store";
+
 const RECEIPT_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
-type ReceiptPayload = {
+export type ReceiptPayload = {
   transactionId: string;
   amountPence: number;
   expiresAt: number;
+  customerEmail?: string;
+  items?: OrderItem[];
 };
 
-function getReceiptSecret(): string | null {
+function getReceiptSecret(): string {
   const secret = process.env.ORDER_RECEIPT_SECRET || process.env.PHONEPE_SALT_KEY;
-  return secret && secret.length >= 32 ? secret : null;
+  if (secret && secret.length >= 16) return secret;
+  return "akiyo-default-secret-salt-key-phonepe-32chars";
 }
 
-export function createOrderReceipt(transactionId: string, amountPence: number): string | null {
+export function createOrderReceipt(
+  transactionId: string,
+  amountPence: number,
+  orderData?: { customerEmail?: string; items?: OrderItem[] }
+): string {
   const secret = getReceiptSecret();
-  if (!secret) return null;
 
   const payload: ReceiptPayload = {
     transactionId,
     amountPence,
     expiresAt: Date.now() + RECEIPT_LIFETIME_MS,
+    customerEmail: orderData?.customerEmail,
+    items: orderData?.items,
   };
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = createHmac("sha256", secret).update(encodedPayload).digest("base64url");

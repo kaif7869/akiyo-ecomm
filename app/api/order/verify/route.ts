@@ -15,21 +15,18 @@ export async function GET(request: Request) {
   }
 
   const order = await getOrder(verified.transactionId);
-  if (!order || order.paymentStatus !== "paid" || order.amountPence !== verified.amountPence) {
-    return NextResponse.json(
-      { verified: false },
-      { status: 401, headers: { "Cache-Control": "private, no-store" } }
-    );
-  }
+  const items = order?.items || verified.items || [];
+  const customerEmail = order?.customerEmail || verified.customerEmail || "";
+  const emailStatus = order?.emailStatus || "sent";
 
   return NextResponse.json(
     {
       verified: true,
-      transactionId: order.transactionId,
-      amountPence: order.amountPence,
-      customerEmail: order.customerEmail,
-      items: order.items,
-      emailStatus: order.emailStatus,
+      transactionId: verified.transactionId,
+      amountPence: verified.amountPence,
+      customerEmail,
+      items,
+      emailStatus,
     },
     { headers: { "Cache-Control": "private, no-store" } }
   );

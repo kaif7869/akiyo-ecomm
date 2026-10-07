@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { useCart } from "@/lib/cart-context";
-import { formatPrice } from "@/lib/catalog";
 
 type PhonePeCheckoutModalProps = {
   isOpen: boolean;
@@ -19,6 +19,11 @@ export function PhonePeCheckoutModal({
   const [mobile, setMobile] = useState("");
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"phonepe" | "qr">("phonepe");
+  const [upiUri, setUpiUri] = useState<string | null>(null);
+  const [copiedVpa, setCopiedVpa] = useState(false);
 
   if (!isOpen) return null;
 
@@ -31,16 +36,46 @@ export function PhonePeCheckoutModal({
   );
   const totalSavingsRupees = Math.max(0, totalMrpRupees - totalPayableRupees);
 
+  const upiVpa = process.env.NEXT_PUBLIC_UPI_VPA || "9611556001@ybl";
+  const upiName = process.env.NEXT_PUBLIC_UPI_NAME || "Akiyo Digital Store";
+  const upiBank = process.env.NEXT_PUBLIC_UPI_BANK_NAME || "Airtel Payment Bank";
+
+  const buildDirectUpiUri = () => {
+    const params = new URLSearchParams({
+      pa: upiVpa,
+      pn: upiName,
+      am: totalPayableRupees.toFixed(2),
+      cu: "INR",
+      tn: "Akiyo Digital Art Order",
+    });
+    return `upi://pay?${params.toString()}`;
+  };
+
+  const currentUpiUri = upiUri || buildDirectUpiUri();
+
+  const handleCopyVpa = async () => {
+    try {
+      await navigator.clipboard.writeText(upiVpa);
+      setCopiedVpa(true);
+      setTimeout(() => setCopiedVpa(false), 2000);
+    } catch {
+      // fallback
+    }
+  };
+
   const handlePhonePePay = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+    setNoticeMessage(null);
 
-    if (!mobile || mobile.replace(/\D/g, "").length < 10) {
-      alert("Please enter a valid 10-digit mobile number.");
+    const cleanPhone = mobile.replace(/\D/g, "");
+    if (cleanPhone.length < 10) {
+      setErrorMessage("Please enter a valid 10-digit mobile number.");
       return;
     }
 
     if (!email || !email.includes("@")) {
-      alert("Please enter a valid email address to receive your download link.");
+      setErrorMessage("Please enter a valid email address to receive your 4K download link.");
       return;
     }
 
@@ -51,9 +86,9 @@ export function PhonePeCheckoutModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          customerName: name || "Customer",
-          customerEmail: email,
-          customerPhone: mobile,
+          customerName: name.trim() || "Customer",
+          customerEmail: email.trim().toLowerCase(),
+          customerPhone: cleanPhone,
           items: items.map((i) => ({
             id: i.product.id,
             quantity: i.quantity,
@@ -69,13 +104,27 @@ export function PhonePeCheckoutModal({
           return;
         }
 
-        throw new Error("Payment provider did not return a secure checkout URL.");
+        // Direct PhonePe UPI QR / Intent mode
+        if (data.qrData || data.mode === "upi_intent") {
+          setUpiUri(data.qrData || currentUpiUri);
+          if (data.phonepeNotice) {
+            setNoticeMessage(data.phonepeNotice);
+          }
+          setActiveTab("qr");
+          setIsSubmitting(false);
+          return;
+        }
+
+        throw new Error("Payment gateway did not return a checkout URL.");
       } else {
         throw new Error(data.error || "Payment initiation failed. Please try again.");
       }
     } catch (err) {
-      console.error(err);
-      alert(err instanceof Error ? err.message : "Payment initiation failed. Please try again.");
+      console.warn("Initiation error:", err);
+      // Fallback gracefully to direct UPI QR rather than blocking the customer
+      setUpiUri(currentUpiUri);
+      setActiveTab("qr");
+      setNoticeMessage("PhonePe gateway in transition. Scan the QR code below or tap to open PhonePe directly.");
       setIsSubmitting(false);
     }
   };
@@ -102,7 +151,7 @@ export function PhonePeCheckoutModal({
                 PhonePe Secure Checkout
               </h2>
               <span className="phonepe-modal-badge">
-                Instant UPI &amp; Cards
+                Instant UPI &bull; Cards &bull; QR
               </span>
             </div>
           </div>
@@ -128,7 +177,54 @@ export function PhonePeCheckoutModal({
           </p>
         </div>
 
-        <form onSubmit={handlePhonePePay} className="phonepe-form">
+        {/* Tab switch: PhonePe Gateway vs Scan QR */}
+        <div className="phonepe-tabs">
+          <button
+            type="button"
+            className={`phonepe-tab ${activeTab === "phonepe" ? "active" : ""}`}
+            onClick={() => setActiveTab("phonepe")}
+          >
+            PhonePe Gateway
+          </button>
+          <button
+            type="button"
+            className={`phonepe-tab ${activeTab === "qr" ? "active" : ""}`}
+            onClick={() => setActiveTab("qr")}
+          >
+            Scan UPI QR Code
+          </button>
+        </div>
+
+        {errorMessage && (
+          <div style={{
+            margin: "12px 20px 0",
+            padding: "10px 14px",
+            backgroundColor: "#fef2f2",
+            border: "1px solid #fecaca",
+            borderRadius: "6px",
+            color: "#b91c1c",
+            fontSize: "13px",
+          }}>
+            {errorMessage}
+          </div>
+        )}
+
+        {noticeMessage && (
+          <div style={{
+            margin: "12px 20px 0",
+            padding: "10px 14px",
+            backgroundColor: "#f0fdf4",
+            border: "1px solid #bbf7d0",
+            borderRadius: "6px",
+            color: "#166534",
+            fontSize: "13px",
+          }}>
+            {noticeMessage}
+          </div>
+        )}
+
+        {activeTab === "phonepe" ? (
+          <form onSubmit={handlePhonePePay} className="phonepe-form">
             <div className="phonepe-field">
               <label htmlFor="customer-name">Full Name</label>
               <input
@@ -222,6 +318,65 @@ export function PhonePeCheckoutModal({
               <span>📱 PhonePe &bull; GPay &bull; Paytm &bull; UPI</span>
             </div>
           </form>
+        ) : (
+          /* UPI QR Code View */
+          <div className="phonepe-qr-view">
+            <p className="phonepe-qr-instruction">
+              Scan with <strong>PhonePe</strong>, <strong>Google Pay</strong>, or{" "}
+              <strong>Paytm</strong> to pay <strong>₹{totalPayableRupees}</strong>
+            </p>
+
+            <div className="phonepe-qr-box">
+              <QRCodeSVG
+                value={currentUpiUri}
+                size={210}
+                level="H"
+                includeMargin
+                aria-label="PhonePe UPI payment QR code"
+              />
+            </div>
+
+            <p className="phonepe-upi-id-note">
+              UPI ID: <code>{upiVpa}</code>
+              <button
+                type="button"
+                onClick={handleCopyVpa}
+                style={{
+                  marginLeft: "8px",
+                  fontSize: "11px",
+                  padding: "2px 8px",
+                  backgroundColor: copiedVpa ? "#16a34a" : "#5f259f",
+                  color: "#fff",
+                  borderRadius: "4px",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                {copiedVpa ? "Copied!" : "Copy"}
+              </button>
+              <br />
+              Bank: {upiBank}
+            </p>
+
+            <a
+              className="phonepe-paid-confirm-btn"
+              href={currentUpiUri}
+              style={{
+                display: "block",
+                textAlign: "center",
+                textDecoration: "none",
+                marginBottom: "10px",
+              }}
+            >
+              📱 Open in PhonePe / UPI App
+            </a>
+
+            <div className="phonepe-badges">
+              <span>🔒 Direct UPI transfer directly to verified merchant</span>
+              <span>⚡ After paying, check your registered email for instant 4K download link</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

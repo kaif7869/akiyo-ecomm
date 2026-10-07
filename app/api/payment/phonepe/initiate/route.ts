@@ -1,18 +1,23 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { getPhonePeConfig, createPhonePePayload } from "@/lib/phonepe";
+import {
+  getPhonePeConfig,
+  createPhonePePayload,
+  generateUPIIntentUri,
+} from "@/lib/phonepe";
 import { products } from "@/data/products";
 import {
   createPendingOrder,
   getOrderItemsFromCart,
   markOrderInitiationFailed,
 } from "@/lib/order-store";
+import { createOrderReceipt } from "@/lib/order-receipt";
 
 export async function POST(request: Request) {
   try {
     const body: unknown = await request.json();
     if (!body || typeof body !== "object") {
-      return NextResponse.json({ success: false, error: "Invalid request." }, { status: 400 });
+      return NextResponse.json({ success: false, error: "Invalid request body." }, { status: 400 });
     }
 
     const input = body as Record<string, unknown>;
@@ -40,84 +45,144 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Your cart contains an unavailable item." }, { status: 400 });
     }
 
-    let config;
-    try {
-      config = getPhonePeConfig();
-    } catch {
-      return NextResponse.json(
-        { success: false, error: "PhonePe checkout is not configured. Please contact the store." },
-        { status: 503 }
-      );
-    }
-
     const configuredBaseUrl = process.env.NEXT_PUBLIC_BASE_URL;
     const appUrl = configuredBaseUrl || new URL(request.url).origin;
     const merchantTransactionId = `AKY_${randomUUID().replace(/-/g, "")}`;
     const merchantUserId = `USER_${randomUUID().replace(/-/g, "")}`;
 
+    const cleanName = customerName.trim();
+    const cleanEmail = customerEmail.trim().toLowerCase();
+    const cleanPhone = customerPhone.replace(/\D/g, "");
+
+    // Store in order store (resilient: Neon Postgres if configured, memory cache fallback)
     await createPendingOrder({
       transactionId: merchantTransactionId,
-      customerName: customerName.trim(),
-      customerEmail: customerEmail.trim().toLowerCase(),
-      customerPhone: customerPhone.replace(/\D/g, ""),
+      customerName: cleanName,
+      customerEmail: cleanEmail,
+      customerPhone: cleanPhone,
       amountPence: pricedCart.amountPence,
       items: pricedCart.items,
     });
 
-    const { base64Payload, checksum, apiUrl } = createPhonePePayload(
-      {
-        merchantTransactionId,
-        merchantUserId,
-        amount: pricedCart.amountPence,
-        customerName: customerName.trim(),
-        customerEmail: customerEmail.trim().toLowerCase(),
-        customerPhone: customerPhone.replace(/\D/g, ""),
-      },
-      config,
-      appUrl
+    const vpa = process.env.NEXT_PUBLIC_UPI_VPA || "9611556001@ybl";
+    const vpaName = process.env.NEXT_PUBLIC_UPI_NAME || "Akiyo Digital Store";
+    const bankName = process.env.NEXT_PUBLIC_UPI_BANK_NAME || "Airtel Payment Bank";
+    const upiUri = generateUPIIntentUri(
+      vpa,
+      vpaName,
+      pricedCart.amountPence / 100,
+      merchantTransactionId
     );
 
-    try {
-      const phonePeResponse = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-VERIFY": checksum,
-          accept: "application/json",
-        },
-        body: JSON.stringify({ request: base64Payload }),
-        signal: AbortSignal.timeout(10000),
-      });
-      const data = await phonePeResponse.json();
-      const redirectUrl = data.data?.instrumentResponse?.redirectInfo?.url;
-      if (phonePeResponse.ok && data.success && typeof redirectUrl === "string") {
-        return NextResponse.json({
+    // Create signed token receipt for stateless cross-instance recovery
+    const orderReceiptToken = createOrderReceipt(merchantTransactionId, pricedCart.amountPence, {
+      customerEmail: cleanEmail,
+      items: pricedCart.items,
+    });
+
+    const config = getPhonePeConfig();
+
+    let responseJson: Record<string, unknown>;
+
+    if (config) {
+      try {
+        const { base64Payload, checksum, apiUrl } = createPhonePePayload(
+          {
+            merchantTransactionId,
+            merchantUserId,
+            amount: pricedCart.amountPence,
+            customerName: cleanName,
+            customerEmail: cleanEmail,
+            customerPhone: cleanPhone,
+          },
+          config,
+          appUrl
+        );
+
+        const phonePeResponse = await fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-VERIFY": checksum,
+            accept: "application/json",
+          },
+          body: JSON.stringify({ request: base64Payload }),
+          signal: AbortSignal.timeout(10000),
+        });
+
+        const data = await phonePeResponse.json().catch(() => null);
+        const redirectUrl = data?.data?.instrumentResponse?.redirectInfo?.url;
+
+        if (phonePeResponse.ok && data?.success && typeof redirectUrl === "string") {
+          responseJson = {
+            success: true,
+            mode: "phonepe_gateway",
+            redirectUrl,
+            merchantTransactionId,
+            amount: pricedCart.amountPence,
+          };
+        } else {
+          console.warn("PhonePe gateway did not provide a redirect URL:", data);
+          await markOrderInitiationFailed(merchantTransactionId);
+          // Fall back gracefully to direct PhonePe UPI QR / Intent
+          responseJson = {
+            success: true,
+            mode: "upi_intent",
+            qrData: upiUri,
+            upiVpa: vpa,
+            bankName,
+            merchantTransactionId,
+            amount: pricedCart.amountPence,
+            phonepeNotice: data?.message || "Using instant PhonePe UPI checkout.",
+          };
+        }
+      } catch (fetchErr) {
+        console.warn("PhonePe gateway network request failed, falling back to UPI QR:", fetchErr);
+        await markOrderInitiationFailed(merchantTransactionId);
+        responseJson = {
           success: true,
-          mode: "phonepe_gateway",
-          redirectUrl,
+          mode: "upi_intent",
+          qrData: upiUri,
+          upiVpa: vpa,
+          bankName,
           merchantTransactionId,
           amount: pricedCart.amountPence,
-        });
+          phonepeNotice: "Using instant PhonePe UPI checkout.",
+        };
       }
-      if (!phonePeResponse.ok || !data.success) {
-        await markOrderInitiationFailed(merchantTransactionId);
-      }
-      return NextResponse.json(
-        { success: false, error: "PhonePe could not start this payment. Please try again." },
-        { status: 502 }
-      );
-    } catch {
-      return NextResponse.json(
-        { success: false, error: "PhonePe is temporarily unavailable. Please try again." },
-        { status: 502 }
-      );
+    } else {
+      // Gateway credentials not configured in environment, offer direct PhonePe UPI
+      responseJson = {
+        success: true,
+        mode: "upi_intent",
+        qrData: upiUri,
+        upiVpa: vpa,
+        bankName,
+        merchantTransactionId,
+        amount: pricedCart.amountPence,
+      };
     }
+
+    const res = NextResponse.json(responseJson);
+
+    // Save pending order receipt token in cookie for serverless lambda callback verification
+    if (orderReceiptToken) {
+      res.cookies.set(`akiyo_pending_${merchantTransactionId}`, orderReceiptToken, {
+        path: "/",
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 3600, // 1 hour
+      });
+    }
+
+    return res;
   } catch (error) {
     console.error("Payment initiation failed.", error);
     return NextResponse.json(
       {
         success: false,
-        error: "Unable to start payment. Please try again.",
+        error: error instanceof Error ? error.message : "Unable to start payment. Please try again.",
       },
       { status: 500 }
     );

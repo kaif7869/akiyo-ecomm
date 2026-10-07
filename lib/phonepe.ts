@@ -26,20 +26,18 @@ export function isPhonePeConfigured(): boolean {
   ].every((value) => Boolean(value?.trim()));
 }
 
-export function getPhonePeConfig(): PhonePeConfig {
-  const env = process.env.PHONEPE_ENV || "UAT";
-  if (env !== "UAT" && env !== "PRODUCTION") {
-    throw new Error("PHONEPE_ENV must be UAT or PRODUCTION.");
+export function getPhonePeConfig(): PhonePeConfig | null {
+  if (!isPhonePeConfigured()) {
+    return null;
   }
 
-  if (!isPhonePeConfigured()) {
-    throw new Error("PhonePe gateway credentials are not configured.");
-  }
+  const rawEnv = (process.env.PHONEPE_ENV || "UAT").toUpperCase().trim();
+  const env: "UAT" | "PRODUCTION" = rawEnv === "PRODUCTION" ? "PRODUCTION" : "UAT";
 
   return {
-    merchantId: process.env.PHONEPE_MERCHANT_ID!,
-    saltKey: process.env.PHONEPE_SALT_KEY!,
-    saltIndex: process.env.PHONEPE_SALT_INDEX!,
+    merchantId: process.env.PHONEPE_MERCHANT_ID!.trim(),
+    saltKey: process.env.PHONEPE_SALT_KEY!.trim(),
+    saltIndex: process.env.PHONEPE_SALT_INDEX!.trim(),
     env,
     baseUrl:
       env === "PRODUCTION"
