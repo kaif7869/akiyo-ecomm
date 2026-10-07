@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { getPhonePeConfig } from "@/lib/phonepe";
 import { getOrder, confirmOrderPayment, setOrderEmailStatus } from "@/lib/order-store";
-import { createOrderReceipt } from "@/lib/order-receipt";
+import { createOrderReceipt, verifyOrderReceipt } from "@/lib/order-receipt";
 import { sendOrderEmail } from "@/lib/order-email";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +16,27 @@ export async function GET(request: Request) {
       return NextResponse.json({ paid: false, error: "Missing transactionId" }, { status: 400 });
     }
 
-    const order = await getOrder(transactionId);
+    // Check if the client's browser holds a signed confirmation cookie (cross-instance serverless sync)
+    const cookieHeader = request.headers.get("cookie") || "";
+    const cookieMatch = cookieHeader.match(new RegExp(`akiyo_paid_${transactionId}=([^;]+)`));
+    if (cookieMatch) {
+      const receiptToken = decodeURIComponent(cookieMatch[1]);
+      const payload = verifyOrderReceipt(receiptToken);
+      if (payload && payload.transactionId === transactionId) {
+        return NextResponse.json({
+          paid: true,
+          status: "paid",
+          receipt: receiptToken,
+          order: {
+            transactionId,
+            customerEmail: payload.customerEmail || "",
+            amountPence: payload.amountPence,
+          },
+        });
+      }
+    }
 
+    const order = await getOrder(transactionId);
     if (order && order.paymentStatus === "paid") {
       const receipt = createOrderReceipt(transactionId, order.amountPence, {
         customerEmail: order.customerEmail,

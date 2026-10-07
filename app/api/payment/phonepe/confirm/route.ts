@@ -94,7 +94,7 @@ export async function POST(request: Request) {
 
     const redirectUrl = `/order-success?receipt=${encodeURIComponent(receipt || "")}&status=success&orderId=${encodeURIComponent(merchantTransactionId)}&email=${encodeURIComponent(paidOrder.customerEmail)}&amount=${amountPence}`;
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       success: true,
       receipt,
       redirectUrl,
@@ -105,6 +105,18 @@ export async function POST(request: Request) {
         amountPence,
       },
     });
+
+    if (receipt) {
+      res.cookies.set(`akiyo_paid_${merchantTransactionId}`, receipt, {
+        path: "/",
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 3600,
+      });
+    }
+
+    return res;
   } catch (err) {
     console.error("Order payment confirm error:", err);
     return NextResponse.json(
