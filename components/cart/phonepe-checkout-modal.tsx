@@ -13,16 +13,18 @@ export function PhonePeCheckoutModal({
   isOpen,
   onClose,
 }: PhonePeCheckoutModalProps) {
-  const { items, subtotalPence } = useCart();
+  const { items, subtotalPence, clearCart } = useCart();
 
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"phonepe" | "qr">("phonepe");
   const [upiUri, setUpiUri] = useState<string | null>(null);
+  const [currentTxnId, setCurrentTxnId] = useState<string | null>(null);
   const [copiedVpa, setCopiedVpa] = useState(false);
 
   if (!isOpen) return null;
@@ -40,18 +42,18 @@ export function PhonePeCheckoutModal({
   const upiName = process.env.NEXT_PUBLIC_UPI_NAME || "Akiyo Digital Store";
   const upiBank = process.env.NEXT_PUBLIC_UPI_BANK_NAME || "Airtel Payment Bank";
 
-  const buildDirectUpiUri = () => {
+  const buildDirectUpiUri = (txnId?: string) => {
     const params = new URLSearchParams({
       pa: upiVpa,
       pn: upiName,
       am: totalPayableRupees.toFixed(2),
       cu: "INR",
-      tn: "Akiyo Digital Art Order",
+      tn: `Akiyo Order ${txnId || ""}`.trim(),
     });
     return `upi://pay?${params.toString()}`;
   };
 
-  const currentUpiUri = upiUri || buildDirectUpiUri();
+  const currentUpiUri = upiUri || buildDirectUpiUri(currentTxnId || undefined);
 
   const handleCopyVpa = async () => {
     try {
@@ -99,6 +101,10 @@ export function PhonePeCheckoutModal({
       const data = await response.json();
 
       if (data.success) {
+        if (data.merchantTransactionId) {
+          setCurrentTxnId(data.merchantTransactionId);
+        }
+
         if (data.mode === "phonepe_gateway" && data.redirectUrl) {
           window.location.href = data.redirectUrl;
           return;
@@ -107,10 +113,10 @@ export function PhonePeCheckoutModal({
         // Direct PhonePe UPI QR / Intent mode
         if (data.qrData || data.mode === "upi_intent") {
           setUpiUri(data.qrData || currentUpiUri);
-          if (data.phonepeNotice) {
-            setNoticeMessage(data.phonepeNotice);
-          }
           setActiveTab("qr");
+          setNoticeMessage(
+            "Scan or tap below to pay with PhonePe. After paying, click 'I Have Paid' to receive your 4K art collection within 24 hours."
+          );
           setIsSubmitting(false);
           return;
         }
@@ -120,12 +126,60 @@ export function PhonePeCheckoutModal({
         throw new Error(data.error || "Payment initiation failed. Please try again.");
       }
     } catch (err) {
-      console.warn("Initiation error:", err);
-      // Fallback gracefully to direct UPI QR rather than blocking the customer
-      setUpiUri(currentUpiUri);
+      console.warn("Initiation fallback:", err);
+      const fallbackTxn = `AKY_${Date.now()}`;
+      setCurrentTxnId(fallbackTxn);
+      setUpiUri(buildDirectUpiUri(fallbackTxn));
       setActiveTab("qr");
-      setNoticeMessage("PhonePe gateway in transition. Scan the QR code below or tap to open PhonePe directly.");
+      setNoticeMessage(
+        "Scan QR or open PhonePe directly. After paying, tap 'I Have Paid' below for 24-hour delivery."
+      );
       setIsSubmitting(false);
+    }
+  };
+
+  const handleManualPaymentConfirmed = async () => {
+    if (!email || !email.includes("@")) {
+      setActiveTab("phonepe");
+      setErrorMessage("Please enter your email above so we know where to deliver your product within 24 hours.");
+      return;
+    }
+
+    setIsConfirming(true);
+    setErrorMessage(null);
+
+    const txnId = currentTxnId || `AKY_${Date.now()}`;
+
+    try {
+      const response = await fetch("/api/payment/phonepe/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          merchantTransactionId: txnId,
+          customerName: name.trim() || "Customer",
+          customerEmail: email.trim().toLowerCase(),
+          customerPhone: mobile.replace(/\D/g, "") || "9999999999",
+          amount: subtotalPence,
+          items: items.map((i) => ({
+            id: i.product.id,
+            quantity: i.quantity,
+          })),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.redirectUrl) {
+        clearCart();
+        window.location.href = data.redirectUrl;
+      } else {
+        clearCart();
+        window.location.href = `/order-success?status=success&orderId=${txnId}&email=${encodeURIComponent(email)}&amount=${subtotalPence}`;
+      }
+    } catch (err) {
+      console.warn("Confirm redirect fallback:", err);
+      clearCart();
+      window.location.href = `/order-success?status=success&orderId=${txnId}&email=${encodeURIComponent(email)}&amount=${subtotalPence}`;
     }
   };
 
@@ -151,7 +205,7 @@ export function PhonePeCheckoutModal({
                 PhonePe Secure Checkout
               </h2>
               <span className="phonepe-modal-badge">
-                Instant UPI &bull; Cards &bull; QR
+                Instant UPI &bull; Cards &bull; QR &bull; 24h Delivery
               </span>
             </div>
           </div>
@@ -218,8 +272,9 @@ export function PhonePeCheckoutModal({
             borderRadius: "6px",
             color: "#166534",
             fontSize: "13px",
+            lineHeight: "1.4",
           }}>
-            {noticeMessage}
+            <strong>⏱️ 24-Hour Product Delivery:</strong> {noticeMessage}
           </div>
         )}
 
@@ -257,7 +312,7 @@ export function PhonePeCheckoutModal({
 
             <div className="phonepe-field">
               <label htmlFor="customer-email">
-                Email Address (Instant 4K Download sent here)
+                Email Address (Product delivered here within 24 hours)
               </label>
               <input
                 id="customer-email"
@@ -313,8 +368,8 @@ export function PhonePeCheckoutModal({
             </button>
 
             <div className="phonepe-badges">
-              <span>🔒 256-bit Encrypted</span>
-              <span>⚡ Instant 4K Download</span>
+              <span>🔒 256-bit Encrypted Payment</span>
+              <span>⏱️ Product delivered to your email within 24 hours</span>
               <span>📱 PhonePe &bull; GPay &bull; Paytm &bull; UPI</span>
             </div>
           </form>
@@ -329,7 +384,7 @@ export function PhonePeCheckoutModal({
             <div className="phonepe-qr-box">
               <QRCodeSVG
                 value={currentUpiUri}
-                size={210}
+                size={200}
                 level="H"
                 includeMargin
                 aria-label="PhonePe UPI payment QR code"
@@ -358,6 +413,7 @@ export function PhonePeCheckoutModal({
               Bank: {upiBank}
             </p>
 
+            {/* Mobile direct deep-link */}
             <a
               className="phonepe-paid-confirm-btn"
               href={currentUpiUri}
@@ -365,15 +421,39 @@ export function PhonePeCheckoutModal({
                 display: "block",
                 textAlign: "center",
                 textDecoration: "none",
-                marginBottom: "10px",
+                marginBottom: "12px",
+                backgroundColor: "#5f259f",
               }}
             >
-              📱 Open in PhonePe / UPI App
+              📱 Tap to Pay in PhonePe / UPI App
             </a>
 
-            <div className="phonepe-badges">
-              <span>🔒 Direct UPI transfer directly to verified merchant</span>
-              <span>⚡ After paying, check your registered email for instant 4K download link</span>
+            {/* Explicit "I Have Paid" confirmation button */}
+            <button
+              type="button"
+              onClick={handleManualPaymentConfirmed}
+              disabled={isConfirming}
+              className="phonepe-paid-confirm-btn"
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "center",
+                border: "none",
+                backgroundColor: "#16a34a",
+                cursor: "pointer",
+                fontSize: "15px",
+                fontWeight: "700",
+                boxShadow: "0 4px 12px rgba(22, 163, 74, 0.3)",
+              }}
+            >
+              {isConfirming
+                ? "Confirming Your Order..."
+                : `✅ I Have Paid ₹${totalPayableRupees} — View Success Message`}
+            </button>
+
+            <div className="phonepe-badges" style={{ marginTop: "14px" }}>
+              <span>⏱️ <strong>Guaranteed Delivery:</strong> Within 24 hours you will get your 4K art collection in your email</span>
+              <span>🔒 Verified direct UPI merchant</span>
             </div>
           </div>
         )}

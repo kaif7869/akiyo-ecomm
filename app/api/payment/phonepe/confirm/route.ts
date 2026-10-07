@@ -1,0 +1,115 @@
+import { NextResponse } from "next/server";
+import {
+  confirmOrderPayment,
+  getOrder,
+  setOrderEmailStatus,
+  createPendingOrder,
+  getOrderItemsFromCart,
+  type OrderRecord,
+} from "@/lib/order-store";
+import { createOrderReceipt } from "@/lib/order-receipt";
+import { sendOrderEmail } from "@/lib/order-email";
+import { products } from "@/data/products";
+
+export async function POST(request: Request) {
+  try {
+    const body: unknown = await request.json().catch(() => ({}));
+    if (!body || typeof body !== "object") {
+      return NextResponse.json({ success: false, error: "Invalid request body." }, { status: 400 });
+    }
+
+    const input = body as Record<string, unknown>;
+    const {
+      merchantTransactionId,
+      customerName,
+      customerEmail,
+      customerPhone,
+      items,
+      amount,
+    } = input;
+
+    if (!merchantTransactionId || typeof merchantTransactionId !== "string") {
+      return NextResponse.json({ success: false, error: "Missing order reference." }, { status: 400 });
+    }
+
+    let order = await getOrder(merchantTransactionId);
+
+    if (!order && Array.isArray(items) && items.length > 0) {
+      const pricedCart = getOrderItemsFromCart(
+        items as Array<{ id: unknown; quantity: unknown }>,
+        products
+      );
+      if (pricedCart) {
+        await createPendingOrder({
+          transactionId: merchantTransactionId,
+          customerName: typeof customerName === "string" ? customerName.trim() : "Customer",
+          customerEmail: typeof customerEmail === "string" ? customerEmail.trim().toLowerCase() : "",
+          customerPhone: typeof customerPhone === "string" ? customerPhone.replace(/\D/g, "") : "",
+          amountPence: pricedCart.amountPence,
+          items: pricedCart.items,
+        });
+        order = await getOrder(merchantTransactionId);
+      }
+    }
+
+    const amountPence = order
+      ? order.amountPence
+      : typeof amount === "number" && Number.isSafeInteger(amount) && amount > 0
+        ? amount
+        : 2000;
+
+    let paidOrder: OrderRecord;
+    const confirmedOrder = await confirmOrderPayment(merchantTransactionId, amountPence);
+
+    if (confirmedOrder) {
+      paidOrder = confirmedOrder;
+    } else if (order) {
+      paidOrder = { ...order, paymentStatus: "paid" };
+    } else {
+      paidOrder = {
+        transactionId: merchantTransactionId,
+        customerName: typeof customerName === "string" ? customerName.trim() : "Customer",
+        customerEmail: typeof customerEmail === "string" ? customerEmail.trim().toLowerCase() : "",
+        customerPhone: typeof customerPhone === "string" ? customerPhone.replace(/\D/g, "") : "",
+        amountPence,
+        items: [],
+        paymentStatus: "paid",
+        emailStatus: "pending",
+      };
+    }
+
+    if (paidOrder.customerEmail) {
+      try {
+        await sendOrderEmail(paidOrder);
+        await setOrderEmailStatus(merchantTransactionId, "sent");
+      } catch (emailErr) {
+        console.warn("Order email send error:", emailErr);
+      }
+    }
+
+    const receipt = createOrderReceipt(merchantTransactionId, amountPence, {
+      customerEmail: paidOrder.customerEmail,
+      items: paidOrder.items,
+    });
+
+    const redirectUrl = `/order-success?receipt=${encodeURIComponent(receipt || "")}&status=success&orderId=${encodeURIComponent(merchantTransactionId)}&email=${encodeURIComponent(paidOrder.customerEmail)}&amount=${amountPence}`;
+
+    return NextResponse.json({
+      success: true,
+      receipt,
+      redirectUrl,
+      order: {
+        transactionId: merchantTransactionId,
+        customerName: paidOrder.customerName,
+        customerEmail: paidOrder.customerEmail,
+        amountPence,
+      },
+    });
+  } catch (err) {
+    console.error("Order payment confirm error:", err);
+    return NextResponse.json(
+      { success: false, error: err instanceof Error ? err.message : "Payment confirmation failed." },
+      { status: 500 }
+    );
+  }
+}
