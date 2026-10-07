@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  claimOrderEmail,
   confirmOrderPayment,
   getOrder,
   setOrderEmailStatus,
@@ -78,13 +79,23 @@ export async function POST(request: Request) {
       };
     }
 
-    if (paidOrder.customerEmail) {
+    let emailSent = false;
+    let emailStatus: OrderRecord["emailStatus"] = paidOrder.emailStatus;
+
+    if (paidOrder.customerEmail && paidOrder.emailStatus !== "sent") {
       try {
-        await sendOrderEmail(paidOrder);
-        await setOrderEmailStatus(merchantTransactionId, "sent");
+        const claimedOrder = await claimOrderEmail(merchantTransactionId);
+        const orderToEmail = claimedOrder || paidOrder;
+        emailSent = await sendOrderEmail(orderToEmail);
+        emailStatus = emailSent ? "sent" : "failed";
+        await setOrderEmailStatus(merchantTransactionId, emailStatus);
       } catch (emailErr) {
         console.warn("Order email send error:", emailErr);
+        emailStatus = "failed";
+        await setOrderEmailStatus(merchantTransactionId, "failed");
       }
+    } else if (paidOrder.emailStatus === "sent") {
+      emailSent = true;
     }
 
     const receipt = createOrderReceipt(merchantTransactionId, amountPence, {
@@ -103,6 +114,8 @@ export async function POST(request: Request) {
         customerName: paidOrder.customerName,
         customerEmail: paidOrder.customerEmail,
         amountPence,
+        emailStatus,
+        emailSent,
       },
     });
 

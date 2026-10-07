@@ -1,8 +1,21 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useCart } from "@/lib/cart-context";
+
+declare global {
+  interface Window {
+    PhonePeCheckout?: {
+      transact: (options: {
+        tokenUrl: string;
+        callback?: (response: string) => void;
+        type?: "IFRAME" | "REDIRECT";
+      }) => void;
+      closePage?: () => void;
+    };
+  }
+}
 
 type PhonePeCheckoutModalProps = {
   isOpen: boolean;
@@ -29,6 +42,9 @@ export function PhonePeCheckoutModal({
   const [upiUri, setUpiUri] = useState<string | null>(null);
   const [currentTxnId, setCurrentTxnId] = useState<string | null>(null);
   const [confirmedReceipt, setConfirmedReceipt] = useState<string | null>(null);
+  const [confirmationEmailSent, setConfirmationEmailSent] = useState<boolean | null>(null);
+  const [isDirectUpiMode, setIsDirectUpiMode] = useState(false);
+  const [isConfirmingPayment, setIsConfirmingPayment] = useState(false);
   const [copiedVpa, setCopiedVpa] = useState(false);
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -58,6 +74,24 @@ export function PhonePeCheckoutModal({
 
   const currentUpiUri = upiUri || buildDirectUpiUri(currentTxnId || undefined);
 
+  const triggerBufferingVerification = useCallback(() => {
+    setPhase("buffering");
+    setBufferingStep(0);
+
+    const step1 = setTimeout(() => setBufferingStep(1), 600);
+    const step2 = setTimeout(() => setBufferingStep(2), 1300);
+    const step3 = setTimeout(() => {
+      clearCart();
+      setPhase("success");
+    }, 2200);
+
+    return () => {
+      clearTimeout(step1);
+      clearTimeout(step2);
+      clearTimeout(step3);
+    };
+  }, [clearCart]);
+
   // Automatic real-time status polling when on QR phase
   useEffect(() => {
     if (!isOpen || phase !== "qr" || !currentTxnId) {
@@ -80,7 +114,7 @@ export function PhonePeCheckoutModal({
             pollingRef.current = null;
           }
           if (data.receipt) setConfirmedReceipt(data.receipt);
-          triggerBufferingVerification(data.receipt);
+          triggerBufferingVerification();
         }
       } catch {
         // Continue polling silently
@@ -95,7 +129,7 @@ export function PhonePeCheckoutModal({
         pollingRef.current = null;
       }
     };
-  }, [isOpen, phase, currentTxnId]);
+  }, [isOpen, phase, currentTxnId, triggerBufferingVerification]);
 
   if (!isOpen) return null;
 
@@ -107,24 +141,6 @@ export function PhonePeCheckoutModal({
     } catch {
       // fallback
     }
-  };
-
-  const triggerBufferingVerification = (existingReceipt?: string) => {
-    setPhase("buffering");
-    setBufferingStep(0);
-
-    const step1 = setTimeout(() => setBufferingStep(1), 600);
-    const step2 = setTimeout(() => setBufferingStep(2), 1300);
-    const step3 = setTimeout(() => {
-      clearCart();
-      setPhase("success");
-    }, 2200);
-
-    return () => {
-      clearTimeout(step1);
-      clearTimeout(step2);
-      clearTimeout(step3);
-    };
   };
 
   const handlePhonePePay = async (e: React.FormEvent) => {
@@ -168,16 +184,40 @@ export function PhonePeCheckoutModal({
         }
 
         if (data.mode === "phonepe_gateway" && data.redirectUrl) {
+          if (typeof window !== "undefined" && window.PhonePeCheckout) {
+            try {
+              window.PhonePeCheckout.transact({
+                tokenUrl: data.redirectUrl,
+                type: "IFRAME",
+                callback: function (response: string) {
+                  if (response === "CONCLUDED") {
+                    // Payment finished successfully inside PhonePe Mercury modal!
+                    triggerBufferingVerification();
+                  } else if (response === "USER_CANCEL") {
+                    setErrorMessage("Payment was cancelled. You can retry or scan the UPI QR code.");
+                    setIsSubmitting(false);
+                  }
+                },
+              });
+              return;
+            } catch (sdkError) {
+              console.warn("Mercury checkout SDK failed, falling back to redirect:", sdkError);
+              window.location.href = data.redirectUrl;
+              return;
+            }
+          }
+
           window.location.href = data.redirectUrl;
           return;
         }
 
         // Direct PhonePe UPI QR / Intent mode
         if (data.qrData || data.mode === "upi_intent") {
+          setIsDirectUpiMode(true);
           setUpiUri(data.qrData || currentUpiUri);
           setPhase("qr");
           setActiveTab("qr");
-          setNoticeMessage("Scan QR or tap to pay with PhonePe. Payment settles automatically in real-time.");
+          setNoticeMessage("Scan QR or tap to pay with PhonePe. After your UPI app shows paid, tap 'I Have Paid' here to confirm your order.");
           setIsSubmitting(false);
           return;
         }
@@ -190,6 +230,7 @@ export function PhonePeCheckoutModal({
       console.warn("Initiation fallback:", err);
       const fallbackTxn = `AKY_${Date.now()}`;
       setCurrentTxnId(fallbackTxn);
+      setIsDirectUpiMode(true);
       setUpiUri(buildDirectUpiUri(fallbackTxn));
       setPhase("qr");
       setActiveTab("qr");
@@ -199,6 +240,8 @@ export function PhonePeCheckoutModal({
   };
 
   const handleManualPaymentConfirmed = async () => {
+    if (isConfirmingPayment) return;
+
     if (!email || !email.includes("@")) {
       setPhase("form");
       setActiveTab("phonepe");
@@ -207,6 +250,7 @@ export function PhonePeCheckoutModal({
     }
 
     setErrorMessage(null);
+    setIsConfirmingPayment(true);
     setPhase("buffering");
     setBufferingStep(0);
 
@@ -233,9 +277,13 @@ export function PhonePeCheckoutModal({
       });
 
       const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Payment confirmation failed.");
+      }
       if (data.receipt) {
         setConfirmedReceipt(data.receipt);
       }
+      setConfirmationEmailSent(data.order?.emailSent === true);
 
       setTimeout(() => setBufferingStep(2), 1200);
 
@@ -245,10 +293,10 @@ export function PhonePeCheckoutModal({
       }, 2000);
     } catch (err) {
       console.warn("Confirm error fallback:", err);
-      setTimeout(() => {
-        clearCart();
-        setPhase("success");
-      }, 1500);
+      setPhase("qr");
+      setErrorMessage("We could not confirm this order yet. Please tap 'I Have Paid' again, or contact support with your UPI payment screenshot.");
+    } finally {
+      setIsConfirmingPayment(false);
     }
   };
 
@@ -403,6 +451,13 @@ export function PhonePeCheckoutModal({
                 <p style={{ margin: 0, fontSize: "13px", color: "#15803d", lineHeight: "1.5" }}>
                   Our team is preparing your complete <strong>4K Ultra HD Wallpaper &amp; Digital Art collection</strong>. Your high-resolution download links will be sent directly to <strong>{email || "your registered email"}</strong> within 24 hours.
                 </p>
+                {confirmationEmailSent !== null && (
+                  <p style={{ margin: "8px 0 0", fontSize: "12px", color: confirmationEmailSent ? "#15803d" : "#b45309", lineHeight: "1.5" }}>
+                    {confirmationEmailSent
+                      ? `Confirmation email sent to ${email}.`
+                      : `Order confirmed. Email delivery is queued for ${email}; support will follow up if automatic email is not configured.`}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -512,6 +567,7 @@ export function PhonePeCheckoutModal({
                 onClick={() => {
                   setActiveTab("qr");
                   setPhase("qr");
+                  setIsDirectUpiMode(true);
                   if (!currentTxnId) {
                     setCurrentTxnId(`AKY_${Date.now()}`);
                   }
@@ -640,7 +696,11 @@ export function PhonePeCheckoutModal({
                       boxShadow: "0 0 0 3px rgba(34, 197, 94, 0.3)",
                     }}
                   />
-                  <span>Listening for UPI payment settlement in real-time...</span>
+                  <span>
+                    {isDirectUpiMode
+                      ? "After payment, tap I Have Paid to show success and send email."
+                      : "Listening for UPI payment settlement in real-time..."}
+                  </span>
                 </div>
 
                 <p className="phonepe-qr-instruction">
@@ -699,6 +759,7 @@ export function PhonePeCheckoutModal({
                 <button
                   type="button"
                   onClick={handleManualPaymentConfirmed}
+                  disabled={isConfirmingPayment}
                   className="phonepe-paid-confirm-btn"
                   style={{
                     display: "block",
@@ -706,14 +767,15 @@ export function PhonePeCheckoutModal({
                     textAlign: "center",
                     border: "none",
                     backgroundColor: "#16a34a",
-                    cursor: "pointer",
+                    cursor: isConfirmingPayment ? "not-allowed" : "pointer",
                     fontSize: "15px",
                     fontWeight: "700",
+                    opacity: isConfirmingPayment ? 0.75 : 1,
                     boxShadow: "0 4px 14px rgba(22, 163, 74, 0.35)",
                     transition: "transform 0.15s ease",
                   }}
                 >
-                  ✅ I Have Paid ₹{totalPayableRupees} — Confirm Order
+                  {isConfirmingPayment ? "Confirming order..." : `✅ I Have Paid ₹${totalPayableRupees} — Confirm Order`}
                 </button>
 
                 <div className="phonepe-badges" style={{ marginTop: "14px" }}>

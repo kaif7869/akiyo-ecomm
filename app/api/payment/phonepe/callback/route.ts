@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { getPhonePeConfig, verifyPhonePeChecksum } from "@/lib/phonepe";
+import {
+  getPhonePeConfig,
+  verifyPhonePeChecksum,
+  isPhonePeV2Configured,
+  checkPhonePeV2OrderStatus,
+} from "@/lib/phonepe";
 import { createOrderReceipt, verifyOrderReceipt } from "@/lib/order-receipt";
 import {
   claimOrderEmail,
@@ -121,10 +126,20 @@ export async function POST(request: Request) {
       return NextResponse.redirect(`${appUrl}/order-success?status=pending`, 303);
     }
 
-    return NextResponse.redirect(
+    const response = NextResponse.redirect(
       `${appUrl}/order-success?receipt=${encodeURIComponent(receipt)}`,
       303
     );
+
+    response.cookies.set(`akiyo_paid_${transactionId}`, receipt, {
+      path: "/",
+      httpOnly: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 86400,
+    });
+
+    return response;
   } catch (error) {
     console.error("PhonePe callback verification failed.", error);
     const appUrl = process.env.NEXT_PUBLIC_BASE_URL || new URL(request.url).origin;
@@ -135,8 +150,100 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   const appUrl = process.env.NEXT_PUBLIC_BASE_URL || new URL(request.url).origin;
 
-  return NextResponse.redirect(
-    `${appUrl}/order-success?status=pending`,
-    303
-  );
+  try {
+    const url = new URL(request.url);
+    const orderId =
+      url.searchParams.get("merchantOrderId") ||
+      url.searchParams.get("orderId") ||
+      url.searchParams.get("transactionId");
+
+    if (!orderId) {
+      return NextResponse.redirect(`${appUrl}/order-success?status=pending`, 303);
+    }
+
+    let order = await getOrder(orderId);
+
+    // If order was not yet found in DB, try recovering from signed cookie
+    if (!order) {
+      const cookieHeader = request.headers.get("cookie") || "";
+      const cookieMatch = cookieHeader.match(new RegExp(`akiyo_pending_${orderId}=([^;]+)`));
+      if (cookieMatch) {
+        const payload = verifyOrderReceipt(decodeURIComponent(cookieMatch[1]));
+        if (payload && payload.transactionId === orderId) {
+          order = {
+            transactionId: orderId,
+            customerName: "Customer",
+            customerEmail: payload.customerEmail || "",
+            customerPhone: "",
+            amountPence: payload.amountPence,
+            items: payload.items || [],
+            paymentStatus: "pending",
+            emailStatus: "pending",
+          };
+        }
+      }
+    }
+
+    // Check PhonePe V2 status if configured
+    let isConfirmedPaid = order?.paymentStatus === "paid";
+    let settledAmount = order?.amountPence || 2000;
+
+    if (!isConfirmedPaid && isPhonePeV2Configured()) {
+      try {
+        const v2Status = await checkPhonePeV2OrderStatus(orderId);
+        if (v2Status.paid) {
+          isConfirmedPaid = true;
+          if (v2Status.amount) settledAmount = v2Status.amount;
+        }
+      } catch (checkErr) {
+        console.warn("V2 callback status check error:", checkErr);
+      }
+    }
+
+    if (isConfirmedPaid && order) {
+      const confirmed = await confirmOrderPayment(orderId, settledAmount);
+      const paidOrder = confirmed || { ...order, paymentStatus: "paid" as const };
+
+      if (paidOrder.emailStatus !== "sent") {
+        const claimed = await claimOrderEmail(orderId);
+        if (claimed) {
+          try {
+            await sendOrderEmail(claimed);
+            await setOrderEmailStatus(orderId, "sent");
+          } catch (mailErr) {
+            console.error("Order delivery email failed:", mailErr);
+          }
+        }
+      }
+
+      const receipt = createOrderReceipt(orderId, settledAmount, {
+        customerEmail: paidOrder.customerEmail,
+        items: paidOrder.items,
+      });
+
+      const response = NextResponse.redirect(
+        `${appUrl}/order-success?receipt=${encodeURIComponent(receipt)}`,
+        303
+      );
+
+      response.cookies.set(`akiyo_paid_${orderId}`, receipt, {
+        path: "/",
+        httpOnly: false,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 86400,
+      });
+
+      return response;
+    }
+
+    return NextResponse.redirect(
+      `${appUrl}/order-success?status=pending&orderId=${orderId}`,
+      303
+    );
+  } catch (err) {
+    console.error("PhonePe GET callback error:", err);
+    return NextResponse.redirect(`${appUrl}/order-success?status=unverified`, 303);
+  }
 }
+

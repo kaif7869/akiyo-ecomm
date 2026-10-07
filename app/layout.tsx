@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Newsreader, Red_Hat_Text } from "next/font/google";
+import Script from "next/script";
 import { CartProvider } from "@/lib/cart-context";
 import { FirstOrderPromo } from "@/components/promo/first-order-promo";
 import "./globals.css";
@@ -44,6 +45,11 @@ export default function RootLayout({
           {children}
           <FirstOrderPromo />
         </CartProvider>
+        {/* PhonePe Mercury Standard Checkout Web Bundle */}
+        <Script
+          src="https://mercury.phonepe.com/web/bundle/checkout.js"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );

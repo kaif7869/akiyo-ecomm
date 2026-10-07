@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import {
+  isPhonePeV2Configured,
+  createPhonePeV2Payment,
   getPhonePeConfig,
   createPhonePePayload,
   generateUPIIntentUri,
@@ -9,7 +11,6 @@ import { products } from "@/data/products";
 import {
   createPendingOrder,
   getOrderItemsFromCart,
-  markOrderInitiationFailed,
 } from "@/lib/order-store";
 import { createOrderReceipt } from "@/lib/order-receipt";
 
@@ -80,13 +81,12 @@ export async function POST(request: Request) {
       items: pricedCart.items,
     });
 
-    const config = getPhonePeConfig();
+    let responseJson: Record<string, unknown> | null = null;
 
-    let responseJson: Record<string, unknown>;
-
-    if (config) {
+    // 1. ATTEMPT PHONEPE V2 STANDARD CHECKOUT (/checkout/v2/pay)
+    if (isPhonePeV2Configured()) {
       try {
-        const { base64Payload, checksum, apiUrl } = createPhonePePayload(
+        const v2Result = await createPhonePeV2Payment(
           {
             merchantTransactionId,
             merchantUserId,
@@ -95,63 +95,76 @@ export async function POST(request: Request) {
             customerEmail: cleanEmail,
             customerPhone: cleanPhone,
           },
-          config,
           appUrl
         );
 
-        const phonePeResponse = await fetch(apiUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-VERIFY": checksum,
-            accept: "application/json",
-          },
-          body: JSON.stringify({ request: base64Payload }),
-          signal: AbortSignal.timeout(10000),
-        });
-
-        const data = await phonePeResponse.json().catch(() => null);
-        const redirectUrl = data?.data?.instrumentResponse?.redirectInfo?.url;
-
-        if (phonePeResponse.ok && data?.success && typeof redirectUrl === "string") {
+        if (v2Result.success && v2Result.redirectUrl) {
           responseJson = {
             success: true,
             mode: "phonepe_gateway",
-            redirectUrl,
+            version: "V2",
+            redirectUrl: v2Result.redirectUrl,
             merchantTransactionId,
             amount: pricedCart.amountPence,
           };
         } else {
-          console.warn("PhonePe gateway did not provide a redirect URL:", data);
-          await markOrderInitiationFailed(merchantTransactionId);
-          // Fall back gracefully to direct PhonePe UPI QR / Intent
-          responseJson = {
-            success: true,
-            mode: "upi_intent",
-            qrData: upiUri,
-            upiVpa: vpa,
-            bankName,
-            merchantTransactionId,
-            amount: pricedCart.amountPence,
-            phonepeNotice: data?.message || "Using instant PhonePe UPI checkout.",
-          };
+          console.warn("PhonePe V2 payment returned error:", v2Result.error);
         }
-      } catch (fetchErr) {
-        console.warn("PhonePe gateway network request failed, falling back to UPI QR:", fetchErr);
-        await markOrderInitiationFailed(merchantTransactionId);
-        responseJson = {
-          success: true,
-          mode: "upi_intent",
-          qrData: upiUri,
-          upiVpa: vpa,
-          bankName,
-          merchantTransactionId,
-          amount: pricedCart.amountPence,
-          phonepeNotice: "Using instant PhonePe UPI checkout.",
-        };
+      } catch (v2Err) {
+        console.warn("PhonePe V2 request failed:", v2Err);
       }
-    } else {
-      // Gateway credentials not configured in environment, offer direct PhonePe UPI
+    }
+
+    // 2. ATTEMPT PHONEPE V1 FALLBACK (/pg/v1/pay) IF V2 WAS NOT USED
+    if (!responseJson) {
+      const configV1 = getPhonePeConfig();
+      if (configV1) {
+        try {
+          const { base64Payload, checksum, apiUrl } = createPhonePePayload(
+            {
+              merchantTransactionId,
+              merchantUserId,
+              amount: pricedCart.amountPence,
+              customerName: cleanName,
+              customerEmail: cleanEmail,
+              customerPhone: cleanPhone,
+            },
+            configV1,
+            appUrl
+          );
+
+          const phonePeResponse = await fetch(apiUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-VERIFY": checksum,
+              accept: "application/json",
+            },
+            body: JSON.stringify({ request: base64Payload }),
+            signal: AbortSignal.timeout(10000),
+          });
+
+          const data = await phonePeResponse.json().catch(() => null);
+          const redirectUrl = data?.data?.instrumentResponse?.redirectInfo?.url;
+
+          if (phonePeResponse.ok && data?.success && typeof redirectUrl === "string") {
+            responseJson = {
+              success: true,
+              mode: "phonepe_gateway",
+              version: "V1",
+              redirectUrl,
+              merchantTransactionId,
+              amount: pricedCart.amountPence,
+            };
+          }
+        } catch (v1Err) {
+          console.warn("PhonePe V1 request failed:", v1Err);
+        }
+      }
+    }
+
+    // 3. SEAMLESS FALLBACK TO DIRECT PHONEPE UPI QR / INTENT
+    if (!responseJson) {
       responseJson = {
         success: true,
         mode: "upi_intent",
@@ -160,6 +173,7 @@ export async function POST(request: Request) {
         bankName,
         merchantTransactionId,
         amount: pricedCart.amountPence,
+        phonepeNotice: "Using instant PhonePe UPI checkout.",
       };
     }
 

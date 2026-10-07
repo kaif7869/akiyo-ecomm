@@ -36,12 +36,13 @@ export async function sendOrderEmail(order: OrderRecord): Promise<boolean> {
     </li>
   `).join("");
 
-  const emailSubject = `Order Confirmed: Within 24 hours you will get your product (Order #${order.transactionId})`;
+  const emailSubject = `Order Confirmed: You will get this product within 24 hrs (Order #${order.transactionId})`;
 
   const emailText = `Hi ${order.customerName},\n\n` +
     `Thank you for your order! Your payment of ${formatPrice(order.amountPence)} has been successfully received.\n\n` +
     `📦 DELIVERY NOTICE:\n` +
-    `Within 24 hours you will get your full 4K digital wallpaper collection delivered to your email (${order.customerEmail}).\n\n` +
+    `You will get this product within 24 hrs.\n` +
+    `Your full 4K digital wallpaper collection will be delivered to your email (${order.customerEmail}).\n\n` +
     `Order Reference: ${order.transactionId}\n` +
     `Amount Paid: ${formatPrice(order.amountPence)}\n\n` +
     `Purchased Items:\n${textItems}\n\n` +
@@ -65,7 +66,7 @@ export async function sendOrderEmail(order: OrderRecord): Promise<boolean> {
         <!-- 24-HOUR DELIVERY NOTICE -->
         <div style="background:#f0fdf4;border:2px solid #86efac;border-radius:8px;padding:16px 20px;margin:24px 0;">
           <div style="margin-bottom:6px;">
-            <strong style="font-size:16px;color:#166534;">⏱️ Within 24 Hours You Will Get Your Product</strong>
+            <strong style="font-size:16px;color:#166534;">You will get this product within 24 hrs</strong>
           </div>
           <p style="margin:0;font-size:14px;color:#15803d;line-height:1.5;">
             Our team is preparing your complete 4K Ultra HD digital art collection. Your download links and high-resolution files will be delivered to <strong>${escapeHtml(order.customerEmail)}</strong> within 24 hours.
