@@ -1,4 +1,5 @@
 import "server-only";
+import nodemailer from "nodemailer";
 import type { OrderRecord } from "@/lib/order-store";
 
 function escapeHtml(value: string): string {
@@ -22,14 +23,7 @@ function formatPrice(pricePence: number): string {
   }).format(pricePence / 100);
 }
 
-export async function sendOrderEmail(order: OrderRecord): Promise<void> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM_EMAIL;
-  if (!apiKey || !from) {
-    console.warn("Order email skipped: RESEND_API_KEY or RESEND_FROM_EMAIL is not configured.");
-    return;
-  }
-
+export async function sendOrderEmail(order: OrderRecord): Promise<boolean> {
   const textItems = order.items.map((item) =>
     `• ${item.title} (Qty: ${item.quantity}) - ${formatPrice(item.unitPricePence * item.quantity)}\nPreview: ${item.artworkImage}`
   ).join("\n\n");
@@ -51,7 +45,7 @@ export async function sendOrderEmail(order: OrderRecord): Promise<void> {
     `Order Reference: ${order.transactionId}\n` +
     `Amount Paid: ${formatPrice(order.amountPence)}\n\n` +
     `Purchased Items:\n${textItems}\n\n` +
-    `If you have any questions or need assistance, contact support@akiyo.co.uk.\n\n` +
+    `If you have any questions or need assistance, reply to this email or contact support@akiyo.co.uk.\n\n` +
     `Thank you,\nAkiyo Digital Store`;
 
   const emailHtml = `
@@ -103,25 +97,75 @@ export async function sendOrderEmail(order: OrderRecord): Promise<void> {
     </div>
   `;
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": `akiyo-order-${order.transactionId}`,
-    },
-    body: JSON.stringify({
-      from,
-      to: [order.customerEmail],
-      subject: emailSubject,
-      text: emailText,
-      html: emailHtml,
-    }),
-    signal: AbortSignal.timeout(8000),
-  });
+  // Method 1: Nodemailer SMTP (Gmail, Zoho, Hostinger, Brevo, or custom SMTP)
+  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER;
+  const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_PASS || process.env.GMAIL_APP_PASSWORD;
+  const smtpHost = process.env.SMTP_HOST || (process.env.GMAIL_USER ? "smtp.gmail.com" : undefined);
+  const smtpPort = Number(process.env.SMTP_PORT) || 465;
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
-    throw new Error(`Email provider returned HTTP ${response.status}: ${errorText}`);
+  if (smtpUser && smtpPass && smtpHost) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+
+      await transporter.sendMail({
+        from: process.env.SMTP_FROM || `Akiyo Orders <${smtpUser}>`,
+        to: order.customerEmail,
+        subject: emailSubject,
+        text: emailText,
+        html: emailHtml,
+      });
+
+      console.log(`Order email sent via SMTP to ${order.customerEmail}`);
+      return true;
+    } catch (smtpErr) {
+      console.warn("SMTP email dispatch failed:", smtpErr);
+    }
   }
+
+  // Method 2: Resend API
+  const resendApiKey = process.env.RESEND_API_KEY;
+  const resendFrom = process.env.RESEND_FROM_EMAIL;
+
+  if (resendApiKey && resendFrom) {
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": `akiyo-order-${order.transactionId}`,
+        },
+        body: JSON.stringify({
+          from: resendFrom,
+          to: [order.customerEmail],
+          subject: emailSubject,
+          text: emailText,
+          html: emailHtml,
+        }),
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (response.ok) {
+        console.log(`Order email sent via Resend to ${order.customerEmail}`);
+        return true;
+      }
+      const errText = await response.text().catch(() => "");
+      console.warn("Resend email dispatch error:", errText);
+    } catch (resendErr) {
+      console.warn("Resend email request failed:", resendErr);
+    }
+  }
+
+  console.warn(
+    `Order email ready for ${order.customerEmail}, but email service credentials (RESEND_API_KEY or SMTP_USER/SMTP_PASS) are not yet configured on Vercel.`
+  );
+  return false;
 }
