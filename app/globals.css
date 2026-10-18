@@ -751,18 +751,52 @@ h1, h2, h3, h4, h5, h6 {
   font-size: 13px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  line-height: 1.4;
 }
 
 .akiyo-product-card__sale-price {
-  font-weight: 500;
+  font-weight: 600;
   color: #000000;
+  letter-spacing: -0.01em;
 }
 
 .akiyo-product-card__compare-price {
   color: var(--text-muted);
   text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
   font-weight: 400;
+}
+
+.akiyo-product-card__discount-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  background-color: #111111;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 640px) {
+  .akiyo-product-card__prices {
+    font-size: 12px;
+    gap: 4px 8px;
+  }
+
+  .akiyo-product-card__compare-price {
+    font-size: 12px;
+  }
+
+  .akiyo-product-card__discount-pill {
+    padding: 3px 7px;
+    font-size: 9px;
+  }
 }
 
 /* ==========================================================================
