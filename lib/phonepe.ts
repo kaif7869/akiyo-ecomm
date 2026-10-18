@@ -4,7 +4,7 @@ import axios from "axios";
 export interface PhonePeInitiateRequest {
   merchantTransactionId: string;
   merchantUserId: string;
-  amount: number; // in Paise (e.g. 2000 paise = ₹20)
+  amount: number; // in paise (e.g. 9900 paise = ₹99)
   customerName?: string;
   customerEmail?: string;
   customerPhone?: string;
@@ -449,4 +449,3 @@ export function generateUPIIntentUri(
   });
   return `upi://pay?${params.toString()}`;
 }
-

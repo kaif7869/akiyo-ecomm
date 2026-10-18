@@ -9,7 +9,15 @@ export type ProductCategory =
   | "Noir"
   | "Wealth"
   | "Passion"
-  | "Life";
+  | "Life"
+  | "Playback"
+  | "Pursuit"
+  | "Resolve"
+  | "Riviera"
+  | "Sonder"
+  | "Surf"
+  | "Unwritten"
+  | "Velocity";
 
 export type Product = {
   id: string;
@@ -18,6 +26,7 @@ export type Product = {
   pricePence: number;
   compareAtPence: number;
   artworkImage: string;
+  available: boolean;
 };
 
 export type SortOption = "featured" | "price-asc" | "price-desc" | "title-asc";

@@ -64,7 +64,7 @@ export async function GET(request: Request) {
       try {
         const v2Status = await checkPhonePeV2OrderStatus(transactionId);
         if (v2Status.paid) {
-          const amountPence = v2Status.amount || order?.amountPence || 2000;
+          const amountPence = v2Status.amount || order?.amountPence || 9900;
           const paidOrder = (await confirmOrderPayment(transactionId, amountPence)) || order;
 
           if (paidOrder) {
@@ -122,7 +122,7 @@ export async function GET(request: Request) {
         const data = await phonePeResp.json().catch(() => null);
 
         if (data?.code === "PAYMENT_SUCCESS" && data?.success) {
-          const amountPence = data.data?.amount || order?.amountPence || 2000;
+          const amountPence = data.data?.amount || order?.amountPence || 9900;
           const paidOrder = await confirmOrderPayment(transactionId, amountPence) || order;
 
           if (paidOrder) {

@@ -186,7 +186,7 @@ export async function GET(request: Request) {
 
     // Check PhonePe V2 status if configured
     let isConfirmedPaid = order?.paymentStatus === "paid";
-    let settledAmount = order?.amountPence || 2000;
+    let settledAmount = order?.amountPence || 9900;
 
     if (!isConfirmedPaid && isPhonePeV2Configured()) {
       try {
@@ -246,4 +246,3 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${appUrl}/order-success?status=unverified`, 303);
   }
 }
-

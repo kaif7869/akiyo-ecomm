@@ -187,9 +187,9 @@ export function CartDrawer() {
                 return (
                   totalSavings > 0 && (
                     <div className="cart-drawer-savings-alert">
-                      <span>🎉 Ad Deal Applied</span>
+                      <span>🎉 Discount applied</span>
                       <strong>
-                        You save {formatPrice(totalSavings)} (Flat ₹69-₹79 OFF)
+                        You save {formatPrice(totalSavings)}
                       </strong>
                     </div>
                   )

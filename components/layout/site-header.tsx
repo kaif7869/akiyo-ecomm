@@ -46,7 +46,7 @@ export function SiteHeader({
         {/* <aside className="akiyo-ad-banner" aria-label="Special promotion">
           <div className="akiyo-ad-banner__inner">
             <Link href="/collection" className="akiyo-ad-btn">
-              Claim for ₹20 &rarr;
+              Shop for ₹99 &rarr;
             </Link>
           </div>
         </aside> */}

@@ -69,6 +69,7 @@ export function ProductCard({
 }: ProductCardProps) {
   const { addToCart } = useCart();
   const [justAdded, setJustAdded] = useState(false);
+  const hasDiscount = product.compareAtPence > product.pricePence;
 
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -90,9 +91,11 @@ export function ProductCard({
           className="akiyo-product-card__image-link"
           aria-label={product.title}
         >
-          <span className="akiyo-product-card__sale-badge">
-            ₹{Math.round((product.compareAtPence - product.pricePence) / 100)} OFF
-          </span>
+          {hasDiscount && (
+            <span className="akiyo-product-card__sale-badge">
+              ₹{Math.round((product.compareAtPence - product.pricePence) / 100)} OFF
+            </span>
+          )}
           <div className="akiyo-product-card__image-container">
             <Image
               src={product.artworkImage}
@@ -127,12 +130,16 @@ export function ProductCard({
           <span className="akiyo-product-card__sale-price">
             {formatPrice(product.pricePence)}
           </span>
-          <span className="akiyo-product-card__compare-price">
-            {formatPrice(product.compareAtPence)}
-          </span>
-          <span className="akiyo-product-card__discount-pill">
-            SAVE ₹{Math.round((product.compareAtPence - product.pricePence) / 100)}
-          </span>
+          {hasDiscount && (
+            <>
+              <span className="akiyo-product-card__compare-price">
+                {formatPrice(product.compareAtPence)}
+              </span>
+              <span className="akiyo-product-card__discount-pill">
+                SAVE ₹{Math.round((product.compareAtPence - product.pricePence) / 100)}
+              </span>
+            </>
+          )}
         </p>
       </div>
     </article>

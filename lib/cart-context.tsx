@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { products } from "@/data/products";
 import type { Product } from "@/types/catalog";
 import { formatPrice } from "@/lib/catalog";
 
@@ -34,7 +35,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
     try {
       const saved = localStorage.getItem("akiyo_cart");
       if (saved) {
-        setItems(JSON.parse(saved));
+        const savedItems: CartItem[] = JSON.parse(saved);
+        setItems(
+          savedItems.flatMap(({ product, quantity }) => {
+            const currentProduct = products.find((item) => item.id === product.id);
+            return currentProduct ? [{ product: currentProduct, quantity }] : [];
+          })
+        );
       }
     } catch {
       // Ignore localStorage errors

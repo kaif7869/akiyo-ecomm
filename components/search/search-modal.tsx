@@ -127,10 +127,14 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
                     </h4>
                     <p className="search-modal-card-price">
                       <span>{formatPrice(product.pricePence)}</span>
-                      <em>{formatPrice(product.compareAtPence)}</em>
-                      <span className="akiyo-product-card__discount-pill">
-                        ₹{Math.round((product.compareAtPence - product.pricePence) / 100)} OFF
-                      </span>
+                      {product.compareAtPence > product.pricePence && (
+                        <>
+                          <em>{formatPrice(product.compareAtPence)}</em>
+                          <span className="akiyo-product-card__discount-pill">
+                            ₹{Math.round((product.compareAtPence - product.pricePence) / 100)} OFF
+                          </span>
+                        </>
+                      )}
                     </p>
                     <button
                       type="button"

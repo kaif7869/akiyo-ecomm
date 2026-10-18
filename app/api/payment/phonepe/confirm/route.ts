@@ -57,7 +57,7 @@ export async function POST(request: Request) {
       ? order.amountPence
       : typeof amount === "number" && Number.isSafeInteger(amount) && amount > 0
         ? amount
-        : 2000;
+        : 9900;
 
     let paidOrder: OrderRecord;
     const confirmedOrder = await confirmOrderPayment(merchantTransactionId, amountPence);

@@ -1,13 +1,23 @@
 "use client";
 
+import { useState } from "react";
 import type { SortOption } from "@/types/catalog";
 
 type CollectionToolbarProps = {
   itemCount: number;
+  highestPricePence: number;
   sort: SortOption;
   viewMode: "grid" | "list";
+  inStockOnly: boolean;
+  outOfStockOnly: boolean;
+  minPrice: string;
+  maxPrice: string;
   onSortChange: (sort: SortOption) => void;
   onViewModeChange: (viewMode: "grid" | "list") => void;
+  onInStockChange: (checked: boolean) => void;
+  onOutOfStockChange: (checked: boolean) => void;
+  onMinPriceChange: (value: string) => void;
+  onMaxPriceChange: (value: string) => void;
 };
 
 function ChevronIcon() {
@@ -42,20 +52,93 @@ function ListIcon() {
 
 export function CollectionToolbar({
   itemCount,
+  highestPricePence,
   sort,
   viewMode,
+  inStockOnly,
+  outOfStockOnly,
+  minPrice,
+  maxPrice,
   onSortChange,
   onViewModeChange,
+  onInStockChange,
+  onOutOfStockChange,
+  onMinPriceChange,
+  onMaxPriceChange,
 }: CollectionToolbarProps) {
+  const [openFilter, setOpenFilter] = useState<"availability" | "price" | null>(null);
+
   return (
     <div className="collection-toolbar">
       <div className="filter-group" aria-label="Collection filters">
-        <button type="button">
-          Availability <ChevronIcon />
-        </button>
-        <button type="button">
-          Price <ChevronIcon />
-        </button>
+        <div className="collection-filter">
+          <button
+            type="button"
+            aria-expanded={openFilter === "availability"}
+            onClick={() => setOpenFilter(openFilter === "availability" ? null : "availability")}
+          >
+            Availability <ChevronIcon />
+          </button>
+          {openFilter === "availability" && (
+            <div className="collection-filter-menu collection-filter-menu--availability">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={inStockOnly}
+                  onChange={(event) => onInStockChange(event.target.checked)}
+                />
+                In stock
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={outOfStockOnly}
+                  onChange={(event) => onOutOfStockChange(event.target.checked)}
+                />
+                Out of stock
+              </label>
+            </div>
+          )}
+        </div>
+        <div className="collection-filter">
+          <button
+            type="button"
+            aria-expanded={openFilter === "price"}
+            onClick={() => setOpenFilter(openFilter === "price" ? null : "price")}
+          >
+            Price <ChevronIcon />
+          </button>
+          {openFilter === "price" && (
+            <div className="collection-filter-menu collection-filter-menu--price">
+              <div className="collection-price-inputs">
+                <label>
+                  <span>₹</span>
+                  <input
+                    aria-label="Minimum price"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={minPrice}
+                    onChange={(event) => onMinPriceChange(event.target.value)}
+                  />
+                </label>
+                <span>to</span>
+                <label>
+                  <span>₹</span>
+                  <input
+                    aria-label="Maximum price"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={maxPrice}
+                    onChange={(event) => onMaxPriceChange(event.target.value)}
+                  />
+                </label>
+              </div>
+              <p>The highest price is ₹{(highestPricePence / 100).toFixed(2)}</p>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="toolbar-actions">

@@ -40,11 +40,11 @@ const faqs = [
   },
   {
     q: "How do I pay using PhonePe or UPI?",
-    a: "We support instant payment through PhonePe, Google Pay, Paytm, BHIM, UPI QR, and all Indian debit/credit cards. Just enter your mobile number and email at checkout to pay ₹20 and download your 4K art collection instantly.",
+    a: "We support instant payment through PhonePe, Google Pay, Paytm, BHIM, UPI QR, and all Indian debit/credit cards. Just enter your mobile number and email at checkout to pay ₹99 and download your 4K art collection instantly.",
   },
   {
-    q: "Why is the price ₹20 instead of ₹99?",
-    a: "For our limited-time special ad campaign, all our premium ₹99 single collections are discounted with a flat ₹79 off to just ₹20 each!",
+    q: "How much does each collection cost?",
+    a: "Every wallpaper collection, including Build Your Own Collection, costs ₹99.",
   },
   {
     q: "Do you offer refunds?",
@@ -125,9 +125,9 @@ export default function Home() {
         {/* 3. RED MARQUEE TICKER */}
         <div className="akiyo-red-marquee" aria-hidden="true">
           <div className="akiyo-red-marquee__inner">
-            <span>WORTH ₹99 NOW AT ₹20 · FLAT ₹69-₹79 OFF · INSTANT PHONEPE UPI DOWNLOAD · 4K ULTRA HD ARTWORKS</span>
-            <span>WORTH ₹99 NOW AT ₹20 · FLAT ₹69-₹79 OFF · INSTANT PHONEPE UPI DOWNLOAD · 4K ULTRA HD ARTWORKS</span>
-            <span>WORTH ₹99 NOW AT ₹20 · FLAT ₹69-₹79 OFF · INSTANT PHONEPE UPI DOWNLOAD · 4K ULTRA HD ARTWORKS</span>
+            <span>ALL COLLECTIONS ₹99 · INSTANT PHONEPE UPI DOWNLOAD · 4K ULTRA HD ARTWORKS</span>
+            <span>ALL COLLECTIONS ₹99 · INSTANT PHONEPE UPI DOWNLOAD · 4K ULTRA HD ARTWORKS</span>
+            <span>ALL COLLECTIONS ₹99 · INSTANT PHONEPE UPI DOWNLOAD · 4K ULTRA HD ARTWORKS</span>
           </div>
         </div>
 
